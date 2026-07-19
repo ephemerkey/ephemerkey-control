@@ -550,6 +550,32 @@ test("a created pool is encrypted at rest; Lock now requires the passphrase", as
   await expect(page.getByTestId("set-id")).toHaveText(id, { timeout: 30_000 });
 });
 
+test("forget a pool removes it from this browser only", async ({ page }) => {
+  await page.goto("/devices");
+  await newPool(page);
+  const drop = (await page.getByTestId("set-id").innerText()).trim(); // will be forgotten
+  await page.getByTestId("nav-pools").click();
+  await newPool(page);
+  const active = (await page.getByTestId("set-id").innerText()).trim(); // stays active
+
+  // Forget the non-active pool from the manage list (inline confirm), so no
+  // switch/unlock happens.
+  await page.getByTestId("nav-pools").click();
+  await page.getByTestId(`pool-forget-${drop}`).click();
+  await page.getByTestId(`pool-forget-confirm-${drop}`).click();
+
+  // Gone here; the active pool survives.
+  await expect(page.getByTestId(`pool-open-${drop}`)).toHaveCount(0);
+  await expect(page.getByTestId(`pool-open-${active}`)).toBeVisible();
+
+  // The server copy is intact — restore the forgotten one via the keywrap it
+  // stored on creation.
+  await page.getByTestId("restore-setid").fill(drop);
+  await page.getByTestId("restore-pass").fill(POOLPASS);
+  await page.getByTestId("restore-btn").click();
+  await expect(page.getByTestId("set-id")).toHaveText(drop, { timeout: 30_000 });
+});
+
 test("two pools coexist; switching to another prompts for its passphrase", async ({ page }) => {
   await page.goto("/devices");
   await newPool(page);

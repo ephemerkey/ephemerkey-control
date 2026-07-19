@@ -59,6 +59,8 @@ interface Pool {
   lockNow: () => void;
   renameActive: (name: string) => void;
   adopt: (k: OwnerKey, name?: string) => void;
+  /** Remove a specific pool from this browser (server copy is kept). */
+  forgetPool: (setId: string) => void;
   /** Adopt a pool from a passphrase-wrapped blob (key QR / server keywrap):
    *  unwrap with the passphrase and keep it encrypted at rest. */
   adoptWrapped: (wrapped: Uint8Array, passphrase: string) => void;
@@ -312,15 +314,26 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     setJustCreated(id); // prompt the manager to save the recovery id
   }
 
-  /** Remove the active pool from this browser and switch to another (or none). */
-  function forget() {
-    if (!setId && !lockedSetId) return;
-    const next = removePool(setId ?? lockedSetId!);
-    setKey(null);
-    setLocked(false);
-    setLockedSetId(null);
+  /** Remove a specific pool from THIS BROWSER only. The server copy (set,
+   *  roster, config/event history, sealed source + keywrap backups) is
+   *  untouched — the pool is still recoverable with its set_id + passphrase,
+   *  keyfile, or key QR. */
+  function forgetPool(target: string) {
+    const wasCurrent = target === setId || target === lockedSetId;
+    const next = removePool(target);
     refreshPools();
-    if (next) switchPool(next);
+    if (wasCurrent) {
+      setKey(null);
+      setLocked(false);
+      setLockedSetId(null);
+      if (next) switchPool(next);
+    }
+  }
+
+  /** Forget the active (or locked) pool from this browser. */
+  function forget() {
+    const t = setId ?? lockedSetId;
+    if (t) forgetPool(t);
   }
 
   /** Sign1(config, owner-kid) sealed to the device, uploaded at next seq. */
@@ -386,6 +399,7 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     lockNow,
     renameActive,
     adopt,
+    forgetPool,
     adoptWrapped,
     createPool,
     justCreated,

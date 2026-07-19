@@ -71,9 +71,14 @@ export default function Backup() {
             Export keyfile
           </button>
           <button data-testid="forget-btn" className="danger" onClick={() => pool.forget()}>
-            Forget key on this browser
+            Forget on this browser
           </button>
         </div>
+        <p className="hint">
+          Forgetting removes this pool from this browser only — the server copy stays, recoverable
+          with its recovery id + passphrase (or keyfile / key QR). To manage several pools, see{" "}
+          <em>+ add / manage pools</em>.
+        </p>
         <div className="row">
           <input
             data-testid="pool-name"

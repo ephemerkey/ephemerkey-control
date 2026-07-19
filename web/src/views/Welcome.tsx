@@ -21,6 +21,7 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [qr, setQr] = useState<{ setId: string; wrapped: Uint8Array } | null>(null);
   const [qrPass, setQrPass] = useState("");
+  const [forgetId, setForgetId] = useState<string | null>(null);
   const [note, setNote] = useState<{ id: string; kind: "ok" | "err"; text: string } | null>(null);
 
   const goManager = () => void navigate("/devices");
@@ -107,6 +108,11 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
       {manage && pool.pools.length > 0 && (
         <div className="card">
           <h3>Your pools</h3>
+          <p className="hint">
+            These are the pools this browser knows about. Forgetting one removes it here only — the
+            pool stays on the server, recoverable with its recovery id + passphrase, keyfile, or key
+            QR.
+          </p>
           {pool.pools.map((p) => (
             <div key={p.setId} className="row">
               <button
@@ -121,6 +127,32 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
                 {p.name || p.setId}
               </button>
               {p.setId === pool.setId && <span className="hint">active</span>}
+              {forgetId === p.setId ? (
+                <>
+                  <span className="hint">forget on this browser?</span>
+                  <button
+                    className="danger"
+                    data-testid={`pool-forget-confirm-${p.setId}`}
+                    onClick={() => {
+                      pool.forgetPool(p.setId);
+                      setForgetId(null);
+                    }}
+                  >
+                    Yes, forget
+                  </button>
+                  <button data-testid={`pool-forget-cancel-${p.setId}`} onClick={() => setForgetId(null)}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="danger"
+                  data-testid={`pool-forget-${p.setId}`}
+                  onClick={() => setForgetId(p.setId)}
+                >
+                  forget
+                </button>
+              )}
             </div>
           ))}
           <p className="crumbs">
