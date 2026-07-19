@@ -32,7 +32,7 @@ pub async fn get_config(
         .execute(&st.db)
         .await?;
     if touched.rows_affected() == 0 {
-        return Err(ApiError::NotFound);
+        return Err(ApiError::NotFound("device not enrolled"));
     }
 
     let row = sqlx::query(
@@ -76,7 +76,7 @@ pub async fn post_events(
         .bind(&device_id)
         .fetch_optional(&st.db)
         .await?
-        .ok_or(ApiError::NotFound)?
+        .ok_or(ApiError::NotFound("device not enrolled"))?
         .get(0);
     let key_bytes: [u8; 32] = sign_pub
         .as_slice()

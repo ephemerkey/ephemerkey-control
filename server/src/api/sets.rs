@@ -37,7 +37,7 @@ async fn require_manager(
         .bind(set_id)
         .fetch_optional(&st.db)
         .await?
-        .ok_or(ApiError::NotFound)?
+        .ok_or(ApiError::NotFound("set not registered on this server — register it first"))?
         .get(0);
     let ek1 = parse_ek1(headers)?;
     consume_challenge(st, &ek1.nonce, "manager").await?;
@@ -236,7 +236,7 @@ pub async fn put_config(
     .bind(&set_id)
     .fetch_optional(&st.db)
     .await?
-    .ok_or(ApiError::NotFound)?;
+    .ok_or(ApiError::NotFound("device not enrolled in this set"))?;
     let floor = row
         .get::<i64, _>("acked_seq")
         .max(row.get::<Option<i64>, _>("latest_seq").unwrap_or(0));
@@ -352,7 +352,7 @@ pub async fn get_config_blob(
     .bind(seq)
     .fetch_optional(&st.db)
     .await?
-    .ok_or(ApiError::NotFound)?;
+    .ok_or(ApiError::NotFound("no config blob at that seq"))?;
     let blob: Vec<u8> = row.get("blob");
     Ok((
         [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
@@ -418,7 +418,7 @@ pub async fn get_set_blob(
         .bind(&kind)
         .fetch_optional(&st.db)
         .await?
-        .ok_or(ApiError::NotFound)?;
+        .ok_or(ApiError::NotFound("no stored blob of this kind"))?;
     let blob: Vec<u8> = row.get("blob");
     let updated_at: i64 = row.get("updated_at");
     Ok((

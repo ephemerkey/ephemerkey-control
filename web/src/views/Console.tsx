@@ -152,9 +152,24 @@ export default function Console() {
 
   // --- add device ---------------------------------------------------------
 
+  /** Enrollment needs the set to exist server-side; register it on demand
+   *  so "add device" works even if the user never clicked Register. */
+  async function ensureRegistered() {
+    if (!key) return;
+    try {
+      await signedPost(key, CTX_REGISTER, "/api/sets", {
+        owner_pub: bytesToHex(key.pub),
+        name: null,
+      });
+    } catch (e) {
+      if (!String(e).includes("already registered")) throw e;
+    }
+  }
+
   async function enroll(fields: { device_id: string; sign_pub: string; kx_pub: string }) {
     if (!key || !setId) return;
     try {
+      await ensureRegistered();
       await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/devices`, {
         device_id: fields.device_id.trim().toLowerCase(),
         sign_pub: fields.sign_pub.trim().toLowerCase(),
@@ -216,6 +231,7 @@ export default function Console() {
     const kxPriv = crypto.getRandomValues(new Uint8Array(32));
     const idHex = bytesToHex(deviceId);
     try {
+      await ensureRegistered();
       await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/devices`, {
         device_id: idHex,
         sign_pub: bytesToHex(ed25519.getPublicKey(signPriv)),
@@ -591,7 +607,16 @@ export default function Console() {
         {!parsedSource && (
           <p className="inline-status err">source doc JSON is invalid — fix it to use the editor</p>
         )}
-        {editingCfg && <ConfigEditor cfg={editingCfg} onChange={updateEditingCfg} />}
+        {editingCfg && (
+          <ConfigEditor
+            cfg={editingCfg}
+            onChange={updateEditingCfg}
+            onPush={(() => {
+              const d = roster?.devices?.find((x: any) => x.device_id === editDevice);
+              return d ? () => pushConfig(d) : undefined;
+            })()}
+          />
+        )}
         <details
           className="advanced"
           open={showSource}

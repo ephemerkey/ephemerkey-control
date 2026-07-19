@@ -43,7 +43,7 @@ pub async fn identify(
     .bind(&device_id)
     .fetch_optional(&st.db)
     .await?
-    .ok_or(ApiError::NotFound)?;
+    .ok_or(ApiError::NotFound("device not enrolled"))?;
 
     crate::auth::consume_challenge(&st, &nonce, "courier").await?;
     let sign_pub: Vec<u8> = row.get("sign_pub");
@@ -84,7 +84,7 @@ pub async fn fetch_config(
     .bind(&device_id)
     .fetch_optional(&st.db)
     .await?
-    .ok_or(ApiError::NotFound)?;
+    .ok_or(ApiError::NotFound("device not enrolled"))?;
 
     let seq: i64 = row.get("seq");
     let blob: Vec<u8> = row.get("blob");
@@ -125,7 +125,7 @@ pub async fn ack(
         .bind(&device_id)
         .fetch_optional(&st.db)
         .await?
-        .ok_or(ApiError::NotFound)?
+        .ok_or(ApiError::NotFound("device not enrolled"))?
         .get(0);
     let key_bytes: [u8; 32] = sign_pub
         .as_slice()
@@ -149,7 +149,7 @@ pub async fn ack(
             .bind(req.seq)
             .fetch_optional(&st.db)
             .await?
-            .ok_or(ApiError::NotFound)?
+            .ok_or(ApiError::NotFound("no config blob at that seq"))?
             .get(0);
     if Sha256::digest(&blob).as_slice() != hash {
         return Err(ApiError::Unauthorized("ack hash does not match stored blob".into()));

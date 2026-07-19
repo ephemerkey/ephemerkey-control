@@ -4,8 +4,8 @@ use axum::Json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
-    #[error("not found")]
-    NotFound,
+    #[error("not found: {0}")]
+    NotFound(&'static str),
     #[error("bad request: {0}")]
     BadRequest(String),
     #[error("unauthorized: {0}")]
@@ -21,7 +21,7 @@ pub enum ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match &self {
-            ApiError::NotFound => StatusCode::NOT_FOUND,
+            ApiError::NotFound(_) => StatusCode::NOT_FOUND,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             ApiError::Conflict(_) => StatusCode::CONFLICT,
