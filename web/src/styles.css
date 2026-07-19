@@ -192,6 +192,87 @@ details.advanced[open] > summary {
   opacity: 0.9;
 }
 
+/* app shell */
+.layout {
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+.layout aside {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  position: sticky;
+  top: 1rem;
+  border-right: 1px solid var(--line-soft);
+  padding-right: 1rem;
+  min-height: 60vh;
+}
+.layout aside a {
+  text-decoration: none;
+  padding: 0.35rem 0.5rem;
+  border-radius: 7px;
+  color: inherit;
+  opacity: 0.75;
+}
+.layout aside a:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+.layout aside a.active {
+  opacity: 1;
+  color: var(--accent);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.poolinfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.8rem;
+}
+.savenote {
+  font-size: 0.72rem;
+  opacity: 0.65;
+  min-height: 1em;
+}
+.savenote.error {
+  color: var(--err);
+  opacity: 1;
+}
+.badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+.crumbs {
+  font-size: 0.82rem;
+  margin: 0.2rem 0;
+}
+.welcome {
+  max-width: 34rem;
+}
+@media (max-width: 44rem) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .layout aside {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: none;
+    border-bottom: 1px solid var(--line-soft);
+    min-height: auto;
+    position: static;
+    padding: 0 0 0.5rem;
+  }
+}
+
 /* config workflow */
 .stepper {
   display: flex;

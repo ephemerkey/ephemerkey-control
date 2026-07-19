@@ -106,17 +106,30 @@ function KeyRow({
   onRemove: () => void;
 }) {
   const d = k.display;
+  const [reveal, setReveal] = useState(false);
   return (
     <fieldset className="editor-row" data-testid={`key-${idx}`}>
       <legend>key {idx}</legend>
       <label className="field">
         secret
-        <input
-          data-testid={`key-${idx}-secret`}
-          value={k.secret}
-          onChange={(e) => onChange({ ...k, secret: e.target.value })}
-        />
-        <span className="fieldhelp">the TOTP seed — exportable to authenticator apps</span>
+        <span className="row">
+          <input
+            data-testid={`key-${idx}-secret`}
+            type={reveal ? "text" : "password"}
+            autoComplete="off"
+            value={k.secret}
+            onChange={(e) => onChange({ ...k, secret: e.target.value })}
+          />
+          <button
+            type="button"
+            data-testid={`key-${idx}-reveal`}
+            title={reveal ? "hide secret" : "reveal secret"}
+            onClick={() => setReveal(!reveal)}
+          >
+            {reveal ? "hide" : "show"}
+          </button>
+        </span>
+        <span className="fieldhelp">the TOTP seed — masked by default; exportable to authenticator apps</span>
       </label>
       <Num
         label="digits"
