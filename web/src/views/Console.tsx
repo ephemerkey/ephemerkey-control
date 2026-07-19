@@ -4,7 +4,8 @@
 // browser is just a cache.
 
 import { useEffect, useState } from "react";
-import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils";
+import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils";
+import { seal, sign1 } from "../lib/cose";
 import {
   exportKeyFile,
   forgetOwnerKey,
@@ -40,6 +41,7 @@ export default function Console() {
   const [restoreSetId, setRestoreSetId] = useState("");
   const [restorePass, setRestorePass] = useState("");
   const [source, setSource] = useState(SOURCE_TEMPLATE);
+  const [devForm, setDevForm] = useState({ device_id: "", sign_pub: "", kx_pub: "", role: 2, name: "" });
 
   const setId = key ? setIdFromPub(key.pub) : null;
 
@@ -91,6 +93,48 @@ export default function Console() {
       setStatus("roster loaded");
     } catch (e) {
       setStatus(`roster failed: ${e}`);
+    }
+  }
+
+  async function addDevice() {
+    if (!key || !setId) return;
+    try {
+      await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/devices`, {
+        ...devForm,
+        device_id: devForm.device_id.trim().toLowerCase(),
+        name: devForm.name || null,
+      });
+      const enrolled = devForm.device_id.slice(0, 16);
+      setDevForm({ device_id: "", sign_pub: "", kx_pub: "", role: 2, name: "" });
+      await loadRoster();
+      setStatus(`device ${enrolled} enrolled`);
+    } catch (e) {
+      setStatus(`add device failed: ${e}`);
+    }
+  }
+
+  /** Sign1(config, owner) sealed to the device kx key, uploaded at next seq.
+   *  Interim payload encoding: UTF-8 JSON of the device's entry in the
+   *  source doc (the emulator's native format) until the integer-keyed
+   *  CBOR config document is pinned. */
+  async function pushConfig(d: any) {
+    if (!key || !setId) return;
+    try {
+      const parsed = JSON.parse(source);
+      const cfg = parsed.devices?.[d.device_id];
+      if (!cfg) throw new Error(`source doc has no devices["${d.device_id}"]`);
+      const seq = Math.max(d.latest_seq ?? 0, d.acked_seq ?? 0) + 1;
+      const inner = sign1(utf8ToBytes(JSON.stringify(cfg)), null, key.priv);
+      const sealed = seal(inner, hexToBytes(d.kx_pub), seq, hexToBytes(d.device_id));
+      await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/configs`, {
+        device_id: d.device_id,
+        seq,
+        blob_b64: btoa(String.fromCharCode(...sealed)),
+      });
+      await loadRoster();
+      setStatus(`config seq ${seq} sealed & pushed for ${d.device_id.slice(0, 16)}`);
+    } catch (e) {
+      setStatus(`push failed: ${e}`);
     }
   }
 
@@ -224,6 +268,46 @@ export default function Console() {
           </div>
 
           <div className="card">
+            <h3>Add device</h3>
+            <p>Paste the enrollment doc fields from a device in provisioning mode.</p>
+            <input
+              data-testid="dev-id"
+              placeholder="device_id (hex)"
+              value={devForm.device_id}
+              onChange={(e) => setDevForm({ ...devForm, device_id: e.target.value })}
+            />{" "}
+            <input
+              data-testid="dev-sign"
+              placeholder="sign_pub (hex, 64 chars)"
+              value={devForm.sign_pub}
+              onChange={(e) => setDevForm({ ...devForm, sign_pub: e.target.value })}
+            />{" "}
+            <input
+              data-testid="dev-kx"
+              placeholder="kx_pub (hex, 64 chars)"
+              value={devForm.kx_pub}
+              onChange={(e) => setDevForm({ ...devForm, kx_pub: e.target.value })}
+            />{" "}
+            <select
+              data-testid="dev-role"
+              value={devForm.role}
+              onChange={(e) => setDevForm({ ...devForm, role: Number(e.target.value) })}
+            >
+              <option value={1}>generator</option>
+              <option value={2}>lock-controller</option>
+            </select>{" "}
+            <input
+              data-testid="dev-name"
+              placeholder="name"
+              value={devForm.name}
+              onChange={(e) => setDevForm({ ...devForm, name: e.target.value })}
+            />{" "}
+            <button data-testid="dev-add" onClick={addDevice}>
+              Enroll device
+            </button>
+          </div>
+
+          <div className="card">
             <h3>Passphrase backup</h3>
             <p>
               Stores your keyfile on the server, encrypted under a passphrase (Argon2id). Recover
@@ -278,6 +362,7 @@ export default function Console() {
                 <th>fw</th>
                 <th>last seen</th>
                 <th>config</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -292,6 +377,11 @@ export default function Console() {
                   <td>
                     acked seq {d.acked_seq}
                     {d.latest_seq > d.acked_seq ? ` (seq ${d.latest_seq} pending)` : ""}
+                  </td>
+                  <td>
+                    <button data-testid={`push-${d.device_id}`} onClick={() => pushConfig(d)}>
+                      Seal &amp; push
+                    </button>
                   </td>
                 </tr>
               ))}

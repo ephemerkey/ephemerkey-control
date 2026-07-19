@@ -14,11 +14,12 @@ use crate::error::ApiError;
 #[derive(serde::Deserialize)]
 pub struct IdentifyReq {
     pub device_id: String,
-    // TODO once firmware IDENTITY/CHALLENGE_SIG frames exist: carry the
-    // device-signed challenge here and verify against devices.sign_pub so a
-    // courier can't probe pending-update state for arbitrary device ids.
-    #[allow(dead_code)]
-    pub challenge_sig: Option<String>,
+    /// Server challenge nonce (purpose 'courier') the device signed.
+    pub nonce: String,
+    /// Ed25519(device_sign, "ek-identify-v1" ‖ nonce) — the serial
+    /// CHALLENGE_SIG frame, hex. Prevents couriers probing pending-update
+    /// state for device ids they aren't physically holding.
+    pub challenge_sig: String,
 }
 
 /// POST /api/courier/identify → { pending, seq }
@@ -28,8 +29,13 @@ pub async fn identify(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let device_id = hex::decode(&req.device_id)
         .map_err(|_| ApiError::BadRequest("device_id: invalid hex".into()))?;
+    let nonce = hex::decode(&req.nonce)
+        .map_err(|_| ApiError::BadRequest("nonce: invalid hex".into()))?;
+    let sig_bytes = hex::decode(&req.challenge_sig)
+        .map_err(|_| ApiError::BadRequest("challenge_sig: invalid hex".into()))?;
+
     let row = sqlx::query(
-        "SELECT d.acked_seq,
+        "SELECT d.sign_pub, d.acked_seq,
                 (SELECT MAX(seq) FROM config_blobs c
                  WHERE c.device_id = d.device_id AND c.acked_at IS NULL) AS pending_seq
          FROM devices d WHERE d.device_id = ?",
@@ -38,6 +44,22 @@ pub async fn identify(
     .fetch_optional(&st.db)
     .await?
     .ok_or(ApiError::NotFound)?;
+
+    crate::auth::consume_challenge(&st, &nonce, "courier").await?;
+    let sign_pub: Vec<u8> = row.get("sign_pub");
+    let key_bytes: [u8; 32] = sign_pub
+        .as_slice()
+        .try_into()
+        .map_err(|_| ApiError::BadRequest("stored sign_pub malformed".into()))?;
+    let key = ephemerkey_envelope::VerifyingKey::from_bytes(&key_bytes)
+        .map_err(|_| ApiError::BadRequest("stored sign_pub invalid".into()))?;
+    let sig = ed25519_dalek::Signature::from_slice(&sig_bytes)
+        .map_err(|_| ApiError::Unauthorized("bad challenge_sig length".into()))?;
+    let mut msg = b"ek-identify-v1".to_vec();
+    msg.extend_from_slice(&nonce);
+    use ed25519_dalek::Verifier;
+    key.verify(&msg, &sig)
+        .map_err(|_| ApiError::Unauthorized("device challenge verification failed".into()))?;
 
     let pending_seq: Option<i64> = row.get("pending_seq");
     Ok(Json(serde_json::json!({

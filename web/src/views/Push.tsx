@@ -4,8 +4,9 @@
 
 import { useState } from "react";
 import { bytesToHex } from "@noble/hashes/utils";
-import { courierFetchConfig, courierIdentify } from "../lib/api";
-import { EkSerial, webSerialSupported } from "../lib/serial";
+import { courierAck, courierChallenge, courierFetchConfig, courierIdentify } from "../lib/api";
+import { parseEnrollment } from "../lib/cose";
+import { EkSerial, FrameType, webSerialSupported } from "../lib/serial";
 
 type Step = { label: string; state: "todo" | "run" | "ok" | "fail"; note?: string };
 
@@ -37,15 +38,18 @@ export default function Push() {
       mark(0, "ok");
 
       mark(1, "run");
-      // TODO: parse the CBOR enrollment doc for device_id + run the
-      // CHALLENGE/CHALLENGE_SIG exchange once firmware lands. Until then the
-      // raw identity payload is treated as the id for display.
-      const identity = await serial.identify();
-      const deviceIdHex = bytesToHex(identity).slice(0, 32);
+      const enrollment = parseEnrollment(await serial.identify());
+      const deviceIdHex = bytesToHex(enrollment.deviceId);
       mark(1, "ok", `device ${deviceIdHex}`);
 
       mark(2, "run");
-      const info = await courierIdentify(deviceIdHex);
+      // Prove physical possession: the device signs a server challenge.
+      const nonce = await courierChallenge();
+      const sigFrame = await serial.request(FrameType.Challenge, nonce);
+      if (sigFrame.type !== FrameType.ChallengeSig) {
+        throw new Error(`unexpected frame ${sigFrame.type}`);
+      }
+      const info = await courierIdentify(deviceIdHex, nonce, sigFrame.payload);
       if (!info.pending) {
         mark(2, "ok", `already current (acked seq ${info.acked_seq})`);
         setBusy(false);
@@ -58,9 +62,9 @@ export default function Push() {
       mark(3, "ok", `${blob.length} sealed bytes`);
 
       mark(4, "run");
-      await serial.pushConfig(seq, blob);
-      // TODO: POST the returned signed ack to /api/courier/ack.
-      mark(4, "ok", `device now at seq ${seq}`);
+      const ack = await serial.pushConfig(seq, blob);
+      await courierAck(deviceIdHex, seq, ack);
+      mark(4, "ok", `device now at seq ${seq} (ack verified by server)`);
     } catch (e) {
       const i = steps.findIndex((s) => s.state === "run");
       mark(i >= 0 ? i : 0, "fail", String(e));

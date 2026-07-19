@@ -129,12 +129,43 @@ export function getConfigBlob(
   return signedGetBytes(key, `/api/sets/${setId}/configs/${deviceId}/${seq}`);
 }
 
-// Courier endpoints are unauthenticated: blobs are opaque by construction.
-export async function courierIdentify(deviceIdHex: string): Promise<any> {
+// Courier endpoints need no owner key — but identify requires proof the
+// courier is physically holding the device (it signs a server challenge).
+export async function courierChallenge(): Promise<Uint8Array> {
+  return getChallenge("courier");
+}
+
+export async function courierIdentify(
+  deviceIdHex: string,
+  nonce: Uint8Array,
+  challengeSig: Uint8Array,
+): Promise<any> {
+  const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
   const res = await fetch("/api/courier/identify", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ device_id: deviceIdHex }),
+    body: JSON.stringify({
+      device_id: deviceIdHex,
+      nonce: toHex(nonce),
+      challenge_sig: toHex(challengeSig),
+    }),
+  });
+  return parseOrThrow(res);
+}
+
+export async function courierAck(
+  deviceIdHex: string,
+  seq: number,
+  ack: Uint8Array,
+): Promise<any> {
+  const res = await fetch("/api/courier/ack", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      device_id: deviceIdHex,
+      seq,
+      ack_b64: btoa(String.fromCharCode(...ack)),
+    }),
   });
   return parseOrThrow(res);
 }

@@ -124,6 +124,42 @@ test("wrong key cannot read another set's source blob", async ({ page }) => {
   await expect(page.getByTestId("status")).toContainText("source load failed");
 });
 
+test("enroll a device and seal+push a config from the console", async ({ page }) => {
+  // Device keys generated node-side; the browser does the sealing. The
+  // server's Rust envelope parser validating the TS-sealed blob's headers
+  // is the cross-implementation check.
+  const { ed25519, x25519 } = await import("@noble/curves/ed25519");
+  const { bytesToHex } = await import("@noble/hashes/utils");
+  const devId = bytesToHex(crypto.getRandomValues(new Uint8Array(12)));
+  const signPub = bytesToHex(ed25519.getPublicKey(ed25519.utils.randomPrivateKey()));
+  const kxPub = bytesToHex(x25519.getPublicKey(crypto.getRandomValues(new Uint8Array(32))));
+
+  await page.goto("/");
+  await page.getByTestId("owner-import").setInputFiles({
+    name: "owner.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(keyfile),
+  });
+  await expect(page.getByTestId("set-id")).toHaveText(setId);
+
+  await page.getByTestId("dev-id").fill(devId);
+  await page.getByTestId("dev-sign").fill(signPub);
+  await page.getByTestId("dev-kx").fill(kxPub);
+  await page.getByTestId("dev-name").fill("e2e lock");
+  await page.getByTestId("dev-add").click();
+  await expect(page.getByTestId("status")).toContainText("enrolled");
+  await expect(page.getByTestId("roster-count")).toContainText("1 device(s)");
+
+  // Config for this device goes into the source doc, then seal & push.
+  await page
+    .getByTestId("source-text")
+    .fill(JSON.stringify({ format: "ekctl-source-v1", devices: { [devId]: { role: 2, keys: [], slots: [] } } }));
+  await page.getByTestId(`push-${devId}`).click();
+  await expect(page.getByTestId("status")).toContainText("config seq 1 sealed & pushed");
+  await expect(page.getByTestId("roster-count")).toContainText("1 device(s)");
+  await expect(page.locator("tbody tr")).toContainText("seq 1 pending");
+});
+
 test("keyfile import from another browser recovers the pool too", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("owner-import").setInputFiles({

@@ -224,12 +224,26 @@ check("put keywrap blob", r.status === 200);
   check("unknown blob kind rejected", bad.status === 400);
 }
 
-// Courier: identify + fetch opaque blob without any credentials.
-let cr = await fetch(`${BASE}/api/courier/identify`, {
-  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ device_id: devId }),
-});
+// Courier identify: requires a device-signed server challenge (proof the
+// courier is physically holding the device).
+async function identifyWith(signPriv) {
+  const cres = await fetch(`${BASE}/api/challenge`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ purpose: "courier" }),
+  });
+  const nonce = hexToBytes((await cres.json()).nonce);
+  const sig = ed25519.sign(concatBytes(utf8ToBytes("ek-identify-v1"), nonce), signPriv);
+  return fetch(`${BASE}/api/courier/identify`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ device_id: devId, nonce: bytesToHex(nonce), challenge_sig: bytesToHex(sig) }),
+  });
+}
+
+let cr = await identifyWith(devSignPriv);
 let cb = await cr.json();
-check("courier identify", cr.status === 200 && cb.pending === true && cb.seq === 1, JSON.stringify(cb));
+check("courier identify (challenge-signed)", cr.status === 200 && cb.pending === true && cb.seq === 1, JSON.stringify(cb));
+
+cr = await identifyWith(ed25519.utils.randomPrivateKey());
+check("courier identify wrong key rejected", cr.status === 401);
 
 cr = await fetch(`${BASE}/api/courier/config/${devId}`);
 const fetched = new Uint8Array(await cr.arrayBuffer());
@@ -264,9 +278,7 @@ check("forged ack rejected", cr.status === 401);
 // Ack reflected everywhere: roster acked_seq, courier no longer pending.
 r = await signedGet(priv, `/api/sets/${setId}`);
 check("acked_seq updated", r.body.devices[0].acked_seq === 1);
-cr = await fetch(`${BASE}/api/courier/identify`, {
-  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ device_id: devId }),
-});
+cr = await identifyWith(devSignPriv);
 cb = await cr.json();
 check("courier sees device current", cb.pending === false && cb.acked_seq === 1);
 
