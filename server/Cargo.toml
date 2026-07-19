@@ -1,0 +1,27 @@
+[package]
+name = "ekctl-server"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "ephemerkey control plane: zero-knowledge blob relay, roster, telemetry"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+ed25519-dalek = "2"
+sha2 = "0.10"
+rand = "0.8"
+hex = "0.4"
+base64 = "0.22"
+
+# Shared firmware core: confirm-TOTP receipt Validator, policy/config types.
+ephemerkey-core = { path = "../../ephemerkey/firmware/ephemerkey-core" }
+# Pinned wire format: COSE-profile Sign1/Encrypt0 + ack/event schemas.
+ephemerkey-envelope = { path = "../../ephemerkey/firmware/ephemerkey-envelope" }
