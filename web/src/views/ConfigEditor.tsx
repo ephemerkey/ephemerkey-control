@@ -20,6 +20,8 @@ import {
   Zone,
 } from "../lib/config";
 
+import ZoneMap from "./ZoneMap";
+
 const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 const POLICY_CARDS: { type: Policy["type"]; title: string; tagline: string; use: string }[] = [
@@ -516,22 +518,28 @@ function ZonesStep({ cfg, onChange }: { cfg: DeviceConfig; onChange: (c: DeviceC
       {zones.map((z, i) => (
         <fieldset className="editor-row" key={i} data-testid={`zone-${i}`}>
           <legend>zone {i}</legend>
-          <label className="field">
-            name
-            <input data-testid={`zone-${i}-name`} value={z.name} onChange={(e) => setZone(i, { ...z, name: e.target.value })} />
-          </label>
-          <label className="field">
-            latitude
-            <input data-testid={`zone-${i}-lat`} type="number" step="any" value={z.lat} onChange={(e) => setZone(i, { ...z, lat: Number(e.target.value) })} />
-          </label>
-          <label className="field">
-            longitude
-            <input data-testid={`zone-${i}-lon`} type="number" step="any" value={z.lon} onChange={(e) => setZone(i, { ...z, lon: Number(e.target.value) })} />
-          </label>
-          <Num label="radius_m" value={z.radius_m} min={10} max={65535} testid={`zone-${i}-radius`} help="circle radius in meters" onChange={(v) => setZone(i, { ...z, radius_m: v })} />
-          <button className="danger" data-testid={`zone-${i}-remove`} onClick={() => onChange({ ...cfg, zones: zones.filter((_, j) => j !== i) })}>
-            remove zone
-          </button>
+          <div className="row">
+            <label className="field">
+              name
+              <input data-testid={`zone-${i}-name`} value={z.name} onChange={(e) => setZone(i, { ...z, name: e.target.value })} />
+            </label>
+            <button className="danger" data-testid={`zone-${i}-remove`} onClick={() => onChange({ ...cfg, zones: zones.filter((_, j) => j !== i) })}>
+              remove zone
+            </button>
+          </div>
+          <ZoneMap zone={z} idx={i} onChange={(nz) => setZone(i, nz)} />
+          <details className="advanced">
+            <summary data-testid={`zone-${i}-exact`}>exact coordinates</summary>
+            <label className="field">
+              latitude
+              <input data-testid={`zone-${i}-lat`} type="number" step="any" value={z.lat} onChange={(e) => setZone(i, { ...z, lat: Number(e.target.value) })} />
+            </label>
+            <label className="field">
+              longitude
+              <input data-testid={`zone-${i}-lon`} type="number" step="any" value={z.lon} onChange={(e) => setZone(i, { ...z, lon: Number(e.target.value) })} />
+            </label>
+            <Num label="radius_m" value={z.radius_m} min={10} max={65535} testid={`zone-${i}-radius`} help="circle radius in meters" onChange={(v) => setZone(i, { ...z, radius_m: v })} />
+          </details>
         </fieldset>
       ))}
       <button data-testid="cfg-add-zone" onClick={() => onChange({ ...cfg, zones: [...zones, defaultZone(zones.length)] })}>

@@ -206,6 +206,15 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await page.getByTestId("step-zones").click();
   await page.getByTestId("cfg-add-zone").click();
   await page.getByTestId("zone-0-name").fill("workshop");
+
+  // Map picker: clicking places the center; the slider drives the radius.
+  await page.getByTestId("zone-0-map").click({ position: { x: 200, y: 120 } });
+  await page.getByTestId("zone-0-exact").click();
+  await expect.poll(async () => page.getByTestId("zone-0-lat").inputValue()).not.toBe("0");
+  await page.getByTestId("zone-0-radius-slider").fill("50"); // log scale ≈ 316 m
+  await expect.poll(async () => Number(await page.getByTestId("zone-0-radius").inputValue())).toBeGreaterThan(100);
+
+  // Exact fields override for precision.
   await page.getByTestId("zone-0-lat").fill("52.1");
   await page.getByTestId("zone-0-radius").fill("250");
 

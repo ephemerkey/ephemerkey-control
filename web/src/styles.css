@@ -341,6 +341,23 @@ details.advanced[open] > summary {
 .daypick {
   gap: 0.25rem;
 }
+.zonemap {
+  max-width: 34rem;
+  margin: 0.4rem 0;
+}
+.zonemap-canvas {
+  height: 240px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  cursor: crosshair;
+}
+.radius-slider {
+  min-width: 14rem;
+}
+.radius-slider input[type="range"] {
+  min-width: 13rem;
+  padding: 0;
+}
 .day {
   display: inline-flex;
   align-items: center;
