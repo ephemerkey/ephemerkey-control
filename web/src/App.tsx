@@ -2,6 +2,7 @@ import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { PoolProvider, usePool } from "./state";
 import AddDevice from "./views/AddDevice";
 import Backup from "./views/Backup";
+import Authenticator from "./views/Authenticator";
 import DeviceDetail from "./views/DeviceDetail";
 import Devices from "./views/Devices";
 import Push from "./views/Push";
@@ -44,6 +45,7 @@ function ManagerArea() {
           <Route path="/devices" element={<Devices />} />
           <Route path="/devices/add" element={<AddDevice />} />
           <Route path="/device/:id" element={<DeviceDetail />} />
+          <Route path="/authenticator/:id" element={<Authenticator />} />
           <Route path="/backup" element={<Backup />} />
           <Route path="*" element={<Navigate to="/devices" replace />} />
         </Routes>

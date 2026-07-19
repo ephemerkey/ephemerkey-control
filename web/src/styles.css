@@ -433,3 +433,17 @@ a {
   cursor: pointer;
   text-decoration: underline;
 }
+
+.qr {
+  display: inline-block;
+  background: #fff;
+  padding: 0.5rem;
+  border-radius: 8px;
+  margin: 0.4rem 0;
+  max-width: 200px;
+}
+.qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}

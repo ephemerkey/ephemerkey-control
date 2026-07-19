@@ -37,6 +37,13 @@ export default function Devices() {
   }
 
   const devices = pool.roster.devices as any[];
+  let authenticators: Record<string, any> = {};
+  try {
+    authenticators = JSON.parse(pool.source).authenticators ?? {};
+  } catch {
+    /* source JSON broken elsewhere — surfaced on Backup page */
+  }
+  const authIds = Object.keys(authenticators);
   return (
     <section>
       <h2 data-testid="roster-count">Devices — {devices.length} device(s)</h2>
@@ -87,6 +94,31 @@ export default function Devices() {
             ))}
           </tbody>
         </table>
+      )}
+      {authIds.length > 0 && (
+        <>
+          <h3 data-testid="auth-count">Authenticator apps — {authIds.length}</h3>
+          <p className="hint">
+            Non-ephemerkey generators: plain TOTP apps holding pool secrets. No geofence or ritual —
+            they mint codes any lock sharing the secret accepts.
+          </p>
+          <table>
+            <tbody>
+              {authIds.map((id) => (
+                <tr key={id}>
+                  <td>
+                    <Link data-testid={`auth-${id}`} to={`/authenticator/${id}`}>
+                      📱 {authenticators[id].name || id.slice(0, 8)}
+                    </Link>
+                  </td>
+                  <td>
+                    {(authenticators[id].keys ?? []).length} key(s) · authenticator app
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
       )}
       {note && (
         <p className={`inline-status ${note.kind}`} data-testid="status-roster">

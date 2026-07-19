@@ -10,6 +10,7 @@ import { signedPost } from "../lib/api";
 import { Enrollment, parseEnrollment } from "../lib/cose";
 import { EkSerial, webSerialSupported } from "../lib/serial";
 import { usePool } from "../state";
+import { defaultSoftKey } from "../lib/config";
 
 function downloadJson(filename: string, obj: unknown) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
@@ -32,6 +33,17 @@ export default function AddDevice() {
 
   const ok = (text: string) => setNote({ kind: "ok", text });
   const err = (text: string) => setNote({ kind: "err", text });
+
+  const [authName, setAuthName] = useState("");
+  function addAuthenticator() {
+    const doc = JSON.parse(pool.source);
+    doc.authenticators = doc.authenticators ?? {};
+    const id = crypto.randomUUID();
+    doc.authenticators[id] = { name: authName || "authenticator", keys: [defaultSoftKey()] };
+    pool.setSource(JSON.stringify(doc, null, 2));
+    setAuthName("");
+    navigate(`/authenticator/${id}`);
+  }
 
   async function enroll(fields: { device_id: string; sign_pub: string; kx_pub: string }, stay = false) {
     if (!pool.key || !pool.setId) return;
@@ -222,6 +234,27 @@ export default function AddDevice() {
             {note.text}
           </p>
         )}
+      </div>
+
+      <div className="card">
+        <h3>Or add a plain authenticator app</h3>
+        <p>
+          A non-ephemerkey generator: an ordinary TOTP app (Google Authenticator, etc.) that holds
+          a pool secret and mints its codes via a scanned QR. No hardware, no enrollment, no config
+          push — and no geofence or display ritual. Use it as a backup code source or for a
+          keyholder without a device.
+        </p>
+        <div className="row">
+          <input
+            data-testid="auth-new-name"
+            placeholder="name (e.g. Alice's phone)"
+            value={authName}
+            onChange={(e) => setAuthName(e.target.value)}
+          />
+          <button className="primary" data-testid="auth-create" onClick={addAuthenticator}>
+            Create authenticator →
+          </button>
+        </div>
       </div>
     </section>
   );

@@ -121,6 +121,48 @@ export interface CalendarWindow {
   end: string; // "HH:MM"
 }
 
+/** A non-ephemerkey generator: a plain authenticator app (or any RFC 6238
+ *  device) that holds pool secrets and mints their codes. No crypto
+ *  identity, no enrollment, no sealed config — it lives only in the source
+ *  doc and is delivered as otpauth QR codes. Its keys either carry their
+ *  own secret or LINK to a lock/generator key (single source of truth) so
+ *  the codes it produces are accepted by that device. */
+export interface SoftKey {
+  label: string;
+  digits: number;
+  period?: number;
+  /** Standalone secret; ignored when `link` is set. */
+  secret?: string;
+  /** Mirror a device key: {device: source-doc device id, key: index}. */
+  link?: { device: string; key: number };
+}
+
+export interface Authenticator {
+  name: string;
+  keys: SoftKey[];
+}
+
+export function defaultSoftKey(): SoftKey {
+  const raw = crypto.getRandomValues(new Uint8Array(20));
+  return {
+    label: "code",
+    digits: 6,
+    secret: Array.from(raw, (b) => String.fromCharCode(33 + (b % 94))).join(""),
+  };
+}
+
+/** Resolve a soft key's effective secret+digits, following a link. */
+export function resolveSoftKey(
+  k: SoftKey,
+  devices: Record<string, DeviceConfig>,
+): { secret: string; digits: number } | null {
+  if (k.link) {
+    const dk = devices[k.link.device]?.keys?.[k.link.key];
+    return dk ? { secret: dk.secret, digits: dk.digits } : null;
+  }
+  return k.secret ? { secret: k.secret, digits: k.digits } : null;
+}
+
 export interface DeviceConfig {
   role: 1 | 2; // 1 generator, 2 lock-controller
   keys: KeyDef[];

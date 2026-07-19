@@ -128,7 +128,15 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     void (async () => {
       await refreshRoster();
       try {
-        await recoverSource();
+        const sealed = await getSourceBlob(key, setId);
+        const text = new TextDecoder().decode(unsealWithSeed(key.priv, sealed));
+        // Don't clobber edits the user made while this fetch was in flight:
+        // only auto-apply the recovered doc if the local one is still pristine.
+        if (sourceRef.current === SOURCE_TEMPLATE) {
+          lastSaved.current = text;
+          setSourceState(text);
+          setSaveState("saved");
+        }
       } catch {
         lastSaved.current = sourceRef.current; // nothing stored yet — that's fine
       }

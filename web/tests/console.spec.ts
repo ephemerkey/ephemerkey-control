@@ -321,6 +321,50 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await expect(page.getByTestId("slot-2-deadman-beat")).toHaveValue("60");
 });
 
+test("non-ephemerkey generator: authenticator with a linked QR key", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("owner-import").setInputFiles({
+    name: "owner.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(keyfile),
+  });
+  await expect(page.getByTestId("set-id")).toHaveText(setId);
+  // Wait for the async source recovery to land before editing, so it can't
+  // clobber the new authenticator (roster carries devices from earlier tests).
+  await expect(page.getByTestId("roster-count")).toContainText("device(s)");
+  await page.getByTestId("nav-backup").click();
+  await openSourceText(page);
+  await expect
+    .poll(async () => {
+      try {
+        return Object.keys(JSON.parse(await page.getByTestId("source-text").inputValue()).devices).length;
+      } catch {
+        return 0;
+      }
+    })
+    .toBeGreaterThan(0);
+
+  // Create a plain authenticator (no hardware, no enrollment).
+  await page.getByTestId("nav-add").click();
+  await page.getByTestId("auth-new-name").fill("Alice phone");
+  await page.getByTestId("auth-create").click();
+  await expect(page.getByTestId("auth-header")).toContainText("Alice phone");
+
+  // Link its key to the mock lock's key 0 (single source of truth) and
+  // reveal the QR + otpauth URI.
+  await page.getByTestId("soft-0-label").fill("front door");
+  const opt = page.locator('[data-testid="soft-0-link"] option', { hasText: "key 0" }).first();
+  await page.getByTestId("soft-0-link").selectOption(await opt.getAttribute("value") as string);
+  await page.getByTestId("soft-0-show").click();
+  await expect(page.getByTestId("qr").locator("svg")).toBeVisible();
+  await expect(page.getByTestId("soft-0-uri")).toContainText("otpauth://totp/");
+  await expect(page.getByTestId("soft-0-uri")).toContainText("algorithm=SHA1");
+
+  // It shows up in the Devices list under authenticators, not the roster.
+  await page.getByTestId("nav-devices").click();
+  await expect(page.getByTestId("auth-count")).toContainText("Authenticator apps — 1");
+});
+
 test("keyfile import from another browser recovers the pool + configs", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("owner-import").setInputFiles({
