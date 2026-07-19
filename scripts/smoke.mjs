@@ -1,111 +1,19 @@
 // End-to-end smoke test against a running ekctl-server, using the same
 // signing scheme as web/src/lib/keys.ts + api.ts.
 // Usage: node scripts/smoke.mjs   (server on 127.0.0.1:8399, fresh DB)
-import { ed25519, x25519 } from "../web/node_modules/@noble/curves/ed25519.js";
-import { sha256 } from "../web/node_modules/@noble/hashes/sha2.js";
-import { hkdf } from "../web/node_modules/@noble/hashes/hkdf.js";
-import { gcm } from "../web/node_modules/@noble/ciphers/aes.js";
-import { bytesToHex, hexToBytes, utf8ToBytes, concatBytes } from "../web/node_modules/@noble/hashes/utils.js";
+import {
+  ed25519, x25519, sha256, bytesToHex, hexToBytes, utf8ToBytes, concatBytes,
+  cUint, cBstr, cArr, cMap, sign1, seal, makeClient,
+} from "./ekenv.mjs";
 
 const BASE = "http://127.0.0.1:8399";
-
-// --- minimal CBOR + "ekenv-v1" envelope, independently implemented here as
-// --- a device simulator; the Rust side (ephemerkey-envelope) must accept it.
-
-function cborHead(major, value) {
-  const m = major << 5;
-  if (value < 24) return Uint8Array.of(m | value);
-  if (value <= 0xff) return Uint8Array.of(m | 24, value);
-  if (value <= 0xffff) return Uint8Array.of(m | 25, value >> 8, value & 0xff);
-  const b = new Uint8Array(5);
-  b[0] = m | 26;
-  new DataView(b.buffer).setUint32(1, value);
-  return b;
-}
-const cUint = (v) => cborHead(0, v);
-const cInt = (v) => (v >= 0 ? cborHead(0, v) : cborHead(1, -1 - v));
-const cBstr = (b) => concatBytes(cborHead(2, b.length), b);
-const cTstr = (s) => concatBytes(cborHead(3, utf8ToBytes(s).length), utf8ToBytes(s));
-const cArr = (...items) => concatBytes(cborHead(4, items.length), ...items);
-const cMap = (...pairs) => concatBytes(cborHead(5, pairs.length / 2), ...pairs);
-
-const SIGN1_PROTECTED = Uint8Array.of(0xa1, 0x01, 0x27); // {1: -8 EdDSA}
-
-function sign1(payload, kid, priv) {
-  const sigStruct = cArr(cTstr("Signature1"), cBstr(SIGN1_PROTECTED), cBstr(new Uint8Array()), cBstr(payload));
-  const sig = ed25519.sign(sigStruct, priv);
-  const unprot = kid ? cMap(cInt(4), cBstr(kid)) : cMap();
-  return cArr(cBstr(SIGN1_PROTECTED), unprot, cBstr(payload), cBstr(sig));
-}
-
-function seal(plaintext, kxPub, seq, target) {
-  const ephPriv = crypto.getRandomValues(new Uint8Array(32));
-  const ephPub = x25519.getPublicKey(ephPriv);
-  const shared = x25519.getSharedSecret(ephPriv, kxPub);
-  const key = hkdf(sha256, shared, ephPub, utf8ToBytes("ekenv-v1"), 16);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const protectedHdr = cMap(cInt(1), cInt(1), cInt(4), cBstr(target), cInt(-65537), cUint(seq));
-  const aad = cArr(cTstr("Encrypt0"), cBstr(protectedHdr), cBstr(new Uint8Array()));
-  const ct = gcm(key, iv, aad).encrypt(plaintext); // ciphertext ‖ tag16
-  const unprot = cMap(cInt(5), cBstr(iv), cInt(-65538), cBstr(ephPub));
-  return cArr(cBstr(protectedHdr), unprot, cBstr(ct));
-}
-
-async function challenge() {
-  const r = await fetch(`${BASE}/api/challenge`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ purpose: "manager" }),
-  });
-  return hexToBytes((await r.json()).nonce);
-}
-
-function sign(priv, context, nonce, payload) {
-  const ctx = utf8ToBytes(context);
-  const digest = sha256(payload);
-  const msg = new Uint8Array(ctx.length + nonce.length + digest.length);
-  msg.set(ctx, 0);
-  msg.set(nonce, ctx.length);
-  msg.set(digest, ctx.length + nonce.length);
-  return bytesToHex(ed25519.sign(msg, priv));
-}
-
-async function ek1Header(priv, context, payload) {
-  const nonce = await challenge();
-  return `EK1 ${bytesToHex(nonce)}:${sign(priv, context, nonce, payload)}`;
-}
-
-async function signedPost(priv, context, path, bodyObj) {
-  const body = JSON.stringify(bodyObj);
-  const auth = await ek1Header(priv, context, utf8ToBytes(body));
-  const r = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: auth },
-    body,
-  });
-  return { status: r.status, body: await r.json() };
-}
-
-async function signedPostBytes(priv, path, bytes) {
-  const auth = await ek1Header(priv, "ekctl-manager-v1", bytes);
-  const r = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/octet-stream", authorization: auth },
-    body: bytes,
-  });
-  return { status: r.status, body: await r.json() };
-}
-
-// GET signatures bind to the full request path.
-async function signedGetRaw(priv, path) {
-  const auth = await ek1Header(priv, "ekctl-manager-v1", utf8ToBytes(path));
-  return fetch(`${BASE}${path}`, { headers: { authorization: auth } });
-}
-
-async function signedGet(priv, path) {
-  const r = await signedGetRaw(priv, path);
-  return { status: r.status, body: await r.json() };
-}
+const client = makeClient(BASE);
+const signedPost = client.signedPost.bind(client);
+const signedPostBytes = client.signedPostBytes.bind(client);
+const signedGetRaw = client.signedGetRaw.bind(client);
+const signedGet = client.signedGet.bind(client);
+const challenge = () => client.challenge("manager");
+const sign = client.sign;
 
 const results = [];
 const check = (name, cond, detail) => {
@@ -167,7 +75,7 @@ check("add device", r.status === 200, JSON.stringify(r.body));
 
 // Seal a real envelope: Encrypt0(Sign1(config, owner), device_kx) at seq 1.
 const configCbor = cMap(cUint(4), cUint(2)); // {4: 2} — role: lock-controller
-const blobBytes = seal(sign1(configCbor, null, priv), x25519.getPublicKey(devKxPriv), 1, devIdBytes);
+const blobBytes = seal(sign1(configCbor, pub, priv), x25519.getPublicKey(devKxPriv), 1, devIdBytes);
 const blob = Buffer.from(blobBytes).toString("base64");
 r = await signedPost(priv, "ekctl-manager-v1", `/api/sets/${setId}/configs`, { device_id: devId, seq: 1, blob_b64: blob });
 check("upload sealed config seq 1", r.status === 200, JSON.stringify(r.body));

@@ -124,7 +124,9 @@ export default function Console() {
       const cfg = parsed.devices?.[d.device_id];
       if (!cfg) throw new Error(`source doc has no devices["${d.device_id}"]`);
       const seq = Math.max(d.latest_seq ?? 0, d.acked_seq ?? 0) + 1;
-      const inner = sign1(utf8ToBytes(JSON.stringify(cfg)), null, key.priv);
+      // kid = owner_pub: carries the owner binding for TOFU enrollment
+      // (a factory-fresh device adopts the first owner it hears).
+      const inner = sign1(utf8ToBytes(JSON.stringify(cfg)), key.pub, key.priv);
       const sealed = seal(inner, hexToBytes(d.kx_pub), seq, hexToBytes(d.device_id));
       await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/configs`, {
         device_id: d.device_id,
