@@ -38,7 +38,7 @@ const POLICY_CARDS: { type: Policy["type"]; title: string; tagline: string; use:
     type: "sequence",
     title: "Paced sequence",
     tagline:
-      "Several valid codes in a row, humanly paced: enforced gaps between entries, then a randomized delay before the action fires.",
+      "Several valid codes in a row, minted at an enforced rhythm — optionally minted FAR AWAY and walked to the lock (the codes' age is part of the proof).",
     use: "forces a deliberate, unhurried unlock — defeats smash-and-grab and rushed coercion",
   },
   {
@@ -431,15 +431,15 @@ function PolicyParams({
             help="0 = fixed rhythm. Otherwise each step the device secretly draws a tighter accept/reject window (by up to this many seconds) — the cadence can't be rehearsed, only felt out live"
             onChange={(v) => onChange({ ...p, jitter_s: v })}
           />
-          <Num label="delay_min_s" value={p.delay_min_s} help="after the last code: wait at least this long" onChange={(v) => onChange({ ...p, delay_min_s: v })} />
-          <Num label="delay_max_s" value={p.delay_max_s} help="…and at most this long (randomized in between)" onChange={(v) => onChange({ ...p, delay_max_s: v })} />
+          <Num label="delay_min_s" value={p.delay_min_s} help="walk time: codes become valid at the lock only this long AFTER minting (30-min walk = 1800; 0 = instant)" onChange={(v) => onChange({ ...p, delay_min_s: v })} />
+          <Num label="delay_max_s" value={p.delay_max_s} help="…and expire this long after minting — together the arrival window: 'minted 30–35 min ago, no fresher, no staler'" onChange={(v) => onChange({ ...p, delay_max_s: v })} />
         </>
       )}
       {p.type === "path" && (
         <>
           <LegBuilder legs={p.leg_keys} keyCount={keyCount} onChange={(v) => onChange({ ...p, leg_keys: v })} testidBase={`slot-${idx}-leg`} />
           <Num label="leg_deadline_s" value={p.leg_deadline_s} help="max seconds between consecutive legs" onChange={(v) => onChange({ ...p, leg_deadline_s: v })} />
-          <Num label="delay_max_s" value={p.delay_max_s} help="randomized delay after the final leg" onChange={(v) => onChange({ ...p, delay_max_s: v })} />
+          <Num label="delay_max_s" value={p.delay_max_s} help="codes minted up to this long ago are accepted — the whole route is entered at the end, order and pace proven by the counters" onChange={(v) => onChange({ ...p, delay_max_s: v })} />
         </>
       )}
       {p.type === "deadman" && (
@@ -680,7 +680,11 @@ function describePolicy(p: Policy): string {
         jitter > 0
           ? `spaced ${p.gap_min_s}–${p.gap_max_s}s apart with the accept window secretly re-drawn each step (jitter up to ${jitter}s)`
           : `spaced ${p.gap_min_s}–${p.gap_max_s}s apart`;
-      return `${p.n} valid codes within ${p.window_s}s, ${pace}, then a randomized ${p.delay_min_s}–${p.delay_max_s}s delay`;
+      const delay =
+        p.delay_max_s > 60
+          ? `, each code minted ${p.delay_min_s}–${p.delay_max_s}s before entry (walk-time window)`
+          : "";
+      return `${p.n} valid codes within ${p.window_s}s, ${pace}${delay}`;
     }
     case "path":
       return `codes from keys [${p.leg_keys.join(" → ")}] in order, each leg within ${p.leg_deadline_s}s, then up to ${p.delay_max_s}s delay`;
