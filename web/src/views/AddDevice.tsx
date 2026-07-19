@@ -2,7 +2,7 @@
 // create a mock device for testing; manual hex entry is the advanced
 // fallback. Success lands you on the device's detail page.
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ed25519, x25519 } from "@noble/curves/ed25519";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
@@ -11,6 +11,32 @@ import { Enrollment, parseEnrollment } from "../lib/cose";
 import { EkSerial, webSerialSupported } from "../lib/serial";
 import { usePool } from "../state";
 import { defaultSoftKey } from "../lib/config";
+
+const QrScanner = lazy(() => import("./QrScanner"));
+
+// A pasted/scanned enrollment doc is hex or base64 of the CBOR Sign1.
+function enrollmentFromText(text: string): Enrollment {
+  const t = text.trim();
+  let bytes: Uint8Array;
+  if (/^[0-9a-fA-F\s]+$/.test(t)) {
+    bytes = hexToBytes(t.replace(/\s/g, ""));
+  } else {
+    const bin = atob(t);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  }
+  return parseEnrollment(bytes); // self-verifies the signature — a strong typo check
+}
+
+/** Validate a hex field as you type. Returns null when ok, else a reason. */
+function hexError(value: string, expectBytes?: number): string | null {
+  const v = value.trim();
+  if (v === "") return "required";
+  if (!/^[0-9a-fA-F]+$/.test(v)) return "not hex";
+  if (v.length % 2 !== 0) return "odd length";
+  if (expectBytes && v.length !== expectBytes * 2) return `expected ${expectBytes} bytes (${expectBytes * 2} hex chars), got ${v.length}`;
+  return null;
+}
 
 function downloadJson(filename: string, obj: unknown) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
@@ -76,22 +102,13 @@ export default function AddDevice() {
     }
   }
 
-  function parsePaste() {
+  function acceptEnrollment(text: string, how: string) {
     try {
-      const text = enrollPaste.trim();
-      let bytes: Uint8Array;
-      if (/^[0-9a-fA-F\s]+$/.test(text)) {
-        bytes = hexToBytes(text.replace(/\s/g, ""));
-      } else {
-        const bin = atob(text);
-        bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      }
-      const enrollment = parseEnrollment(bytes);
+      const enrollment = enrollmentFromText(text);
       setParsed(enrollment);
-      ok(`parsed identity of ${bytesToHex(enrollment.deviceId)} (fw ${enrollment.fw})`);
+      ok(`${how} identity of ${bytesToHex(enrollment.deviceId)} (fw ${enrollment.fw}) · signature verified ✓`);
     } catch (e) {
-      err(`could not parse enrollment doc: ${e}`);
+      err(`could not read enrollment doc: ${e}`);
     }
   }
 
@@ -152,10 +169,13 @@ export default function AddDevice() {
             value={enrollPaste}
             onChange={(e) => setEnrollPaste(e.target.value)}
           />
-          <button data-testid="dev-parse" onClick={parsePaste}>
+          <button data-testid="dev-parse" onClick={() => acceptEnrollment(enrollPaste, "parsed")}>
             Parse
           </button>
         </div>
+        <Suspense fallback={<p className="hint">loading scanner…</p>}>
+          <QrScanner label="Scan enrollment QR" onResult={(t) => acceptEnrollment(t, "scanned")} />
+        </Suspense>
         {parsed && (
           <div className="preview" data-testid="dev-preview">
             <code>{bytesToHex(parsed.deviceId)}</code> · fw {parsed.fw} · self-signature verified ✓
@@ -202,32 +222,43 @@ export default function AddDevice() {
         </div>
         <details className="advanced">
           <summary data-testid="dev-advanced">manual entry</summary>
-          <div className="row">
-            <input
-              data-testid="dev-id"
-              placeholder="device_id (hex)"
-              value={manual.device_id}
-              onChange={(e) => setManual({ ...manual, device_id: e.target.value })}
-            />
-            <input
-              data-testid="dev-sign"
-              placeholder="sign_pub (64 hex)"
-              value={manual.sign_pub}
-              onChange={(e) => setManual({ ...manual, sign_pub: e.target.value })}
-            />
-            <input
-              data-testid="dev-kx"
-              placeholder="kx_pub (64 hex)"
-              value={manual.kx_pub}
-              onChange={(e) => setManual({ ...manual, kx_pub: e.target.value })}
-            />
-            <button
-              data-testid="dev-add-manual"
-              onClick={() => enroll(manual).catch((e) => err(`enroll failed: ${e}`))}
-            >
-              Enroll (manual) →
-            </button>
-          </div>
+          {(() => {
+            const eId = hexError(manual.device_id);
+            const eSign = hexError(manual.sign_pub, 32);
+            const eKx = hexError(manual.kx_pub, 32);
+            const invalid = eId || eSign || eKx;
+            const field = (
+              key: "device_id" | "sign_pub" | "kx_pub",
+              ph: string,
+              e: string | null,
+              tid: string,
+            ) => (
+              <label className="field">
+                <input
+                  data-testid={tid}
+                  className={manual[key] && e ? "invalid" : ""}
+                  placeholder={ph}
+                  value={manual[key]}
+                  onChange={(ev) => setManual({ ...manual, [key]: ev.target.value.trim() })}
+                />
+                {manual[key] && e && <span className="fieldhelp err">{e}</span>}
+              </label>
+            );
+            return (
+              <div className="row">
+                {field("device_id", "device_id (hex)", eId, "dev-id")}
+                {field("sign_pub", "sign_pub (64 hex)", eSign, "dev-sign")}
+                {field("kx_pub", "kx_pub (64 hex)", eKx, "dev-kx")}
+                <button
+                  data-testid="dev-add-manual"
+                  disabled={!!invalid}
+                  onClick={() => enroll(manual).catch((e) => err(`enroll failed: ${e}`))}
+                >
+                  Enroll (manual) →
+                </button>
+              </div>
+            );
+          })()}
         </details>
         {note && (
           <p className={`inline-status ${note.kind}`} data-testid="status-devices">

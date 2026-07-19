@@ -4,7 +4,7 @@
 // source doc as you go. The raw JSON stays visible in the console's
 // advanced fold; this is the human path.
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import {
   CalendarWindow,
   QUORUM_UNPACED_MAX,
@@ -24,7 +24,7 @@ import {
   Zone,
 } from "../lib/config";
 
-import ZoneMap from "./ZoneMap";
+const ZoneMap = lazy(() => import("./ZoneMap")); // leaflet stays out of the initial bundle
 
 const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
@@ -837,7 +837,9 @@ function ZonesStep({ cfg, onChange }: { cfg: DeviceConfig; onChange: (c: DeviceC
               remove zone
             </button>
           </div>
-          <ZoneMap zone={z} idx={i} onChange={(nz) => setZone(i, nz)} />
+          <Suspense fallback={<p className="hint">loading map…</p>}>
+            <ZoneMap zone={z} idx={i} onChange={(nz) => setZone(i, nz)} />
+          </Suspense>
           <details className="advanced">
             <summary data-testid={`zone-${i}-exact`}>exact coordinates</summary>
             <label className="field">

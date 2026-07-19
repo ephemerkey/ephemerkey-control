@@ -490,6 +490,32 @@ test("switching a device's role updates its shown role", async ({ page }) => {
   await expect(page.locator("tbody")).toContainText("generator");
 });
 
+test("manual enroll validates hex fields to catch typos", async ({ page }) => {
+  const { ed25519, x25519 } = await import("@noble/curves/ed25519");
+  const { bytesToHex } = await import("@noble/hashes/utils");
+  await page.goto("/devices");
+  await page.getByTestId("owner-import").setInputFiles({
+    name: "owner.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(keyfile),
+  });
+  await expect(page.getByTestId("set-id")).toHaveText(setId);
+
+  await page.getByTestId("nav-add").click();
+  await page.getByTestId("dev-advanced").click();
+  await page.getByTestId("dev-id").fill(bytesToHex(crypto.getRandomValues(new Uint8Array(12))));
+  // A sign_pub one char short — invalid, enroll stays disabled.
+  await page.getByTestId("dev-sign").fill(bytesToHex(ed25519.getPublicKey(ed25519.utils.randomPrivateKey())).slice(0, 63));
+  await page.getByTestId("dev-kx").fill(bytesToHex(x25519.getPublicKey(crypto.getRandomValues(new Uint8Array(32)))));
+  await expect(page.getByTestId("dev-add-manual")).toBeDisabled();
+  // Fix it → enabled.
+  await page.getByTestId("dev-sign").fill(bytesToHex(ed25519.getPublicKey(ed25519.utils.randomPrivateKey())));
+  await expect(page.getByTestId("dev-add-manual")).toBeEnabled();
+  // A non-hex char is rejected too.
+  await page.getByTestId("dev-kx").fill("zz" + "0".repeat(62));
+  await expect(page.getByTestId("dev-add-manual")).toBeDisabled();
+});
+
 test("landing chooses between manage and program flows", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("landing-manage")).toBeVisible();

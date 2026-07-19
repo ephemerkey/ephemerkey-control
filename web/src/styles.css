@@ -486,3 +486,8 @@ a {
 .keyqr-block { margin: 0.6rem 0; }
 .keyqr-block h4 { margin: 0.4rem 0 0.2rem; }
 .keyqr-block code { font-size: 0.62rem; word-break: break-all; }
+
+.qr-video { width: 100%; max-width: 320px; border-radius: 8px; margin: 0.4rem 0; background: #000; }
+.qrscanner { margin: 0.4rem 0; }
+input.invalid { border-color: var(--err); }
+.fieldhelp.err { color: var(--err); opacity: 0.9; }
