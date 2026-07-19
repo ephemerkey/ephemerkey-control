@@ -32,33 +32,33 @@ const POLICY_CARDS: { type: Policy["type"]; title: string; tagline: string; use:
     type: "always",
     title: "Master key",
     tagline: "Any single valid code fires the action immediately.",
-    use: "everyday access; an override key kept in a safe",
+    use: "everyday access; an override key in a safe. Example: the front-door key",
   },
   {
     type: "sequence",
     title: "Paced sequence",
     tagline:
       "Several valid codes in a row, minted at an enforced rhythm — optionally minted FAR AWAY and walked to the lock (the codes' age is part of the proof).",
-    use: "forces a deliberate, unhurried unlock — defeats smash-and-grab and rushed coercion",
+    use: "a deliberate, unhurried unlock — defeats smash-and-grab. Example: 3 codes minted 90–240 s apart at the far shed, entered together 30–35 min later",
   },
   {
     type: "path",
     title: "Walk the path",
     tagline:
       "Codes from specific keys in a fixed order, each leg within a deadline. With zone keys, the generator only mints a zone's codes inside that zone.",
-    use: "proves a route was actually walked (home → transit → site)",
+    use: "proves a route was actually walked. Example: home key → transit key → site key, in order, each leg within 15 min",
   },
   {
     type: "deadman",
     title: "Dead man's switch",
     tagline: "A valid code must arrive every beat; miss one and the action fires on its own.",
-    use: "auto-lock or alert when check-ins stop",
+    use: "auto-lock when check-ins stop. Example: a valid code every hour or the vault re-locks itself",
   },
   {
     type: "quorum",
     title: "Quorum",
     tagline: "M distinct keys out of a named group, together within a window; optionally strictly alternating.",
-    use: "two-person rule — no single keyholder can do it alone",
+    use: "two-person rule — no single keyholder can act alone. Example: 2 of 3 officers within 10 min, optionally in strict alternation",
   },
 ];
 
@@ -107,16 +107,21 @@ function KeyRow({
   k,
   idx,
   keyCount,
+  role,
+  zones,
   onChange,
   onRemove,
 }: {
   k: KeyDef;
   idx: number;
   keyCount: number;
+  role: 1 | 2;
+  zones: Zone[];
   onChange: (k: KeyDef) => void;
   onRemove: () => void;
 }) {
   const d = k.display;
+  const isGen = role === 1;
   const [reveal, setReveal] = useState(false);
   return (
     <fieldset className="editor-row" data-testid={`key-${idx}`}>
@@ -155,7 +160,32 @@ function KeyRow({
         remove key
       </button>
       <details className="advanced">
-        <summary data-testid={`key-${idx}-adv`}>advanced: decoy twin &amp; display ritual</summary>
+        <summary data-testid={`key-${idx}-adv`}>
+          {isGen ? "advanced: zone binding, decoy twin, display ritual, receipt chain" : "advanced: decoy twin"}
+        </summary>
+        {isGen && (
+          <label className="field">
+            mint zone
+            <select
+              data-testid={`key-${idx}-zone`}
+              value={k.zone ?? ""}
+              disabled={zones.length === 0}
+              onChange={(e) => onChange({ ...k, zone: e.target.value === "" ? undefined : Number(e.target.value) })}
+            >
+              <option value="">anywhere</option>
+              {zones.map((z, i) => (
+                <option key={i} value={i}>
+                  {z.name}
+                </option>
+              ))}
+            </select>
+            <span className="fieldhelp">
+              {zones.length === 0
+                ? "define zones in the Zones step to zone-bind this key"
+                : "this key's codes only mint inside this zone — a code then PROVES where it was minted"}
+            </span>
+          </label>
+        )}
         <label className="field">
           decoy twin
           <select
@@ -177,6 +207,7 @@ function KeyRow({
             duress slot, or poison for a show-once display
           </span>
         </label>
+        {isGen && (<>
         <label className="field">
           display
           <select
@@ -301,6 +332,7 @@ function KeyRow({
             />
           </>
         )}
+        </>)}
       </details>
     </fieldset>
   );
@@ -725,9 +757,38 @@ function describeSlot(s: SlotDef, zones: Zone[], calendars: CalendarWindow[]): s
   return parts.join("; ");
 }
 
+function describeGenKey(k: KeyDef, idx: number, zones: Zone[]): string {
+  const parts = [`key ${idx}: mints ${k.digits}-digit codes`];
+  if (k.zone !== undefined) {
+    parts.push(`only inside zone '${zones[k.zone]?.name ?? `#${k.zone}`}'`);
+  } else {
+    parts.push("anywhere");
+  }
+  if (k.display) {
+    const once =
+      k.display.once === "refuse"
+        ? ", one look per code"
+        : k.display.once === "decoy"
+          ? ", poison decoys after the first look"
+          : "";
+    parts.push(`${k.display.mode} display${once}`);
+  }
+  if (k.decoy !== undefined) parts.push(`decoy twin = key ${k.decoy}`);
+  if (k.chain) {
+    parts.push(
+      `chained: requires the lock's ${k.chain.action} receipt, then a ${k.chain.min_elapsed_s}s cooling-off`,
+    );
+  }
+  return parts.join("; ");
+}
+
 // ------------------------------------------------------------------ wizard
 
-const STEPS = ["Device", "Keys", "Zones", "Rituals", "Review"];
+// The generator is a simple minting device — its "ritual" is where codes
+// may mint, how they're displayed, and the receipt chain. Unlock rituals
+// (slots) exist only on lock-controllers.
+const LOCK_STEPS = ["Device", "Keys", "Zones", "Rituals", "Review"];
+const GEN_STEPS = ["Device", "Keys", "Zones", "Review"];
 
 function ZonesStep({ cfg, onChange }: { cfg: DeviceConfig; onChange: (c: DeviceConfig) => void }) {
   const zones = cfg.zones ?? [];
@@ -738,11 +799,20 @@ function ZonesStep({ cfg, onChange }: { cfg: DeviceConfig; onChange: (c: DeviceC
   return (
     <div className="step">
       <p className="stephint">
-        Optional context rituals can require. <strong>Zones</strong> are geofences — a ritual can
-        demand the lock itself sits inside one (portable locks carry their own GNSS).{" "}
-        <strong>Time windows</strong> restrict when a ritual works at all. Define them here, then
-        attach them under a ritual&apos;s <em>advanced gates</em>. Skip this step if you don&apos;t
-        need either.
+        {cfg.role === 1 ? (
+          <>
+            <strong>Zones</strong> are where this generator&apos;s keys may mint — bind a key to a
+            zone in the Keys step and its codes prove they were minted there. Time windows are
+            mostly a lock-side tool. Skip if this generator mints anywhere.
+          </>
+        ) : (
+          <>
+            Optional context rituals can require. <strong>Zones</strong> are geofences — a ritual
+            can demand the lock itself sits inside one (portable locks carry their own GNSS).{" "}
+            <strong>Time windows</strong> restrict when a ritual works at all. Attach either under a
+            ritual&apos;s <em>advanced gates</em>. Skip this step if you don&apos;t need them.
+          </>
+        )}
       </p>
 
       <h4>Zones</h4>
@@ -834,8 +904,10 @@ export default function ConfigEditor({
   onChange: (cfg: DeviceConfig) => void;
   onPush?: () => void;
 }) {
-  const [step, setStep] = useState(0);
+  const [stepName, setStepName] = useState("Device");
   const [slotIdx, setSlotIdx] = useState(0);
+  const steps = cfg.role === 1 ? GEN_STEPS : LOCK_STEPS;
+  const step = steps.includes(stepName) ? stepName : "Device";
   const setKey = (i: number, k: KeyDef) => onChange({ ...cfg, keys: cfg.keys.map((x, j) => (j === i ? k : x)) });
   const setSlot = (i: number, s: SlotDef) => onChange({ ...cfg, slots: cfg.slots.map((x, j) => (j === i ? s : x)) });
   const selSlot = cfg.slots[Math.min(slotIdx, cfg.slots.length - 1)];
@@ -843,24 +915,27 @@ export default function ConfigEditor({
   return (
     <div className="config-editor">
       <nav className="stepper">
-        {STEPS.map((name, i) => (
+        {steps.map((name, i) => (
           <button
             key={name}
             data-testid={`step-${name.toLowerCase()}`}
-            className={i === step ? "current" : ""}
-            onClick={() => setStep(i)}
+            className={name === step ? "current" : ""}
+            onClick={() => setStepName(name)}
           >
             {i + 1}. {name}
           </button>
         ))}
       </nav>
 
-      {step === 0 && (
+      {step === "Device" && (
         <div className="step">
           <p className="stephint">
-            What is this device? A <strong>generator</strong> mints geofenced codes on its display;
-            a <strong>lock-controller</strong> receives codes and drives the physical lock. The
-            rituals you define next run on the lock side.
+            What is this device? A <strong>generator</strong> is a simple minting device: its whole
+            &quot;ritual&quot; is <em>where</em> its keys may mint (zone binding), <em>how</em> codes
+            appear on its display, and whether it&apos;s chained to the lock&apos;s receipts. A{" "}
+            <strong>lock-controller</strong> receives codes and drives the physical lock — the
+            unlock rituals (paced sequences, quorums, …) run there. A geofenced generator plus a
+            master-key ritual on the lock is the simplest complete setup.
           </p>
           <label className="field">
             role
@@ -870,46 +945,67 @@ export default function ConfigEditor({
             </select>
           </label>
           <div className="row">
-            <button className="primary" onClick={() => setStep(1)}>
+            <button className="primary" onClick={() => setStepName("Keys")}>
               Next: keys →
             </button>
           </div>
         </div>
       )}
 
-      {step === 1 && (
+      {step === "Keys" && (
         <div className="step">
           <p className="stephint">
-            Keys are the TOTP secrets. Whoever holds a secret — a generator inside its geofence, or
-            an authenticator app you export it to — can mint that key&apos;s codes. The rituals in
-            the next step decide what each key&apos;s codes actually do.
+            {cfg.role === 1 ? (
+              <>
+                This generator&apos;s minting keys. Each is a TOTP secret; under <em>advanced</em>{" "}
+                you can zone-bind it (codes only mint inside a place — the code proves where it was
+                minted), shape the display ritual (scatter, show-once, poison decoys), and chain it
+                to the lock&apos;s receipts.
+              </>
+            ) : (
+              <>
+                The secrets this lock accepts. A key here matches the generator (or exported
+                authenticator) holding the same secret; the rituals in the next step decide what
+                entering its codes does. Display rituals and receipt chains are configured on the
+                generator device.
+              </>
+            )}
           </p>
           {cfg.keys.map((k, i) => (
-            <KeyRow key={i} k={k} idx={i} keyCount={cfg.keys.length} onChange={(nk) => setKey(i, nk)} onRemove={() => onChange({ ...cfg, keys: cfg.keys.filter((_, j) => j !== i) })} />
+            <KeyRow
+              key={i}
+              k={k}
+              idx={i}
+              keyCount={cfg.keys.length}
+              role={cfg.role}
+              zones={cfg.zones ?? []}
+              onChange={(nk) => setKey(i, nk)}
+              onRemove={() => onChange({ ...cfg, keys: cfg.keys.filter((_, j) => j !== i) })}
+            />
           ))}
           <div className="row">
             <button data-testid="cfg-add-key" onClick={() => onChange({ ...cfg, keys: [...cfg.keys, defaultKey()] })}>
               + add key
             </button>
-            <button className="primary" onClick={() => setStep(2)}>
+            <button className="primary" onClick={() => setStepName("Zones")}>
               Next: zones &amp; times →
             </button>
           </div>
         </div>
       )}
 
-      {step === 2 && (
+      {step === "Zones" && (
         <>
           <ZonesStep cfg={cfg} onChange={onChange} />
           <div className="row">
-            <button className="primary" onClick={() => setStep(3)}>
-              Next: rituals →
+            <button className="primary" onClick={() => setStepName(cfg.role === 1 ? "Review" : "Rituals")}>
+              Next: {cfg.role === 1 ? "review" : "rituals"} →
             </button>
           </div>
         </>
       )}
 
-      {step === 3 && (
+      {step === "Rituals" && (
         <div className="step">
           <p className="stephint">
             Each <strong>ritual</strong> (slot) is an independent rule: which key it listens to, how
@@ -961,25 +1057,33 @@ export default function ConfigEditor({
             />
           )}
           <div className="row">
-            <button className="primary" onClick={() => setStep(4)}>
+            <button className="primary" onClick={() => setStepName("Review")}>
               Next: review →
             </button>
           </div>
         </div>
       )}
 
-      {step === 4 && (
+      {step === "Review" && (
         <div className="step" data-testid="cfg-review">
           <p className="stephint">Read this back like a contract — it is exactly what the device will enforce.</p>
           <p>
             <strong>{cfg.role === 1 ? "Generator" : "Lock-controller"}</strong> with {cfg.keys.length}{" "}
             key(s){cfg.keys.some((k) => k.decoy !== undefined) ? " (incl. decoy twins)" : ""}:
           </p>
-          <ol className="review-list">
-            {cfg.slots.map((s, i) => (
-              <li key={i}>{describeSlot(s, cfg.zones ?? [], cfg.calendars ?? [])}</li>
-            ))}
-          </ol>
+          {cfg.role === 1 ? (
+            <ol className="review-list">
+              {cfg.keys.map((k, i) => (
+                <li key={i}>{describeGenKey(k, i, cfg.zones ?? [])}</li>
+              ))}
+            </ol>
+          ) : (
+            <ol className="review-list">
+              {cfg.slots.map((s, i) => (
+                <li key={i}>{describeSlot(s, cfg.zones ?? [], cfg.calendars ?? [])}</li>
+              ))}
+            </ol>
+          )}
           {configFeatures(cfg).length > 0 && (
             <p className="hint" data-testid="cfg-crit">
               Requires device support for: <strong>{configFeatures(cfg).join(", ")}</strong> — a

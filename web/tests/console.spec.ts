@@ -197,12 +197,8 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await page.getByTestId("cfg-add-key").click();
   await page.getByTestId("key-0-adv").click();
   await page.getByTestId("key-0-decoy").selectOption("1");
-  await page.getByTestId("key-0-chain").selectOption("on"); // witness chain
-  await page.getByTestId("key-0-chain-elapsed").fill("1200");
-  await page.getByTestId("key-1-adv").click();
-  await page.getByTestId("key-1-display").selectOption("custom");
-  await page.getByTestId("key-1-mode").selectOption("scatter");
-  await page.getByTestId("key-1-once").selectOption("refuse");
+  // display rituals & receipt chains are generator-side: not offered here
+  await expect(page.getByTestId("key-0-chain")).toHaveCount(0);
 
   // Zones & times: define a named zone the gates can reference.
   await page.getByTestId("step-zones").click();
@@ -262,8 +258,32 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await expect(review).toContainText("arms for 90s before firing — key 1 can veto");
   await expect(review).toContainText("dies after 3 fire(s)");
   await expect(page.getByTestId("cfg-crit")).toContainText(
-    "budget, chain, quorum-pace, seq-jitter, veto, zones",
+    "budget, quorum-pace, seq-jitter, veto, zones",
   );
+
+  // --- generator phase: same pool, a generator's view of its keys ---
+  await page.getByTestId("step-device").click();
+  await page.getByTestId("cfg-role").selectOption("1");
+  await expect(page.getByTestId("step-rituals")).toHaveCount(0); // no lock rituals on a generator
+  await page.getByTestId("step-keys").click();
+  await page.getByTestId("key-0-adv").click();
+  await page.getByTestId("key-0-zone").selectOption({ label: "workshop" });
+  await page.getByTestId("key-0-chain").selectOption("on"); // witness chain
+  await page.getByTestId("key-0-chain-elapsed").fill("1200");
+  await page.getByTestId("key-1-adv").click();
+  await page.getByTestId("key-1-display").selectOption("custom");
+  await page.getByTestId("key-1-mode").selectOption("scatter");
+  await page.getByTestId("key-1-once").selectOption("refuse");
+  await page.getByTestId("step-review").click();
+  const genReview = page.getByTestId("cfg-review");
+  await expect(genReview).toContainText("Generator");
+  await expect(genReview).toContainText("only inside zone 'workshop'");
+  await expect(genReview).toContainText("chained: requires the lock's lock receipt, then a 1200s cooling-off");
+  await expect(page.getByTestId("cfg-crit")).toContainText("chain");
+  // back to lock role for the push + JSON checks below
+  await page.getByTestId("step-device").click();
+  await page.getByTestId("cfg-role").selectOption("2");
+  await page.getByTestId("step-review").click();
   await page.getByTestId("cfg-push").click();
   await expect(page.getByTestId("status-push")).toContainText("sealed & pushed");
 
@@ -274,6 +294,7 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   const cfg = doc.devices[mockId];
   expect(cfg.keys[0].decoy).toBe(1);
   expect(cfg.keys[0].chain).toMatchObject({ mode: "sequence", action: "lock", min_elapsed_s: 1200 });
+  expect(cfg.keys[0].zone).toBe(0);
   expect(cfg.slots[0]).toMatchObject({ veto_delay_s: 90, veto_key: 1, budget: 3 });
   expect(cfg.keys[1].display).toMatchObject({ mode: "scatter", once: "refuse" });
   expect(cfg.slots[0]).toMatchObject({

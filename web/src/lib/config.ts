@@ -35,6 +35,9 @@ export interface KeyDef {
   decoy?: number; // index of this key's decoy twin in keys[]
   display?: KeyDisplay;
   chain?: KeyChain;
+  /** Generator zone binding: this key's codes only mint inside zones[zone]
+   *  — a code then proves where it was minted (zone-keyed secrets). */
+  zone?: number;
 }
 
 export function defaultChain(): KeyChain {
@@ -198,6 +201,7 @@ export function configFeatures(cfg: DeviceConfig): string[] {
   }
   for (const k of cfg.keys) {
     if (k.chain) f.add("chain");
+    if (k.zone !== undefined) f.add("zones");
   }
   return [...f].sort();
 }
