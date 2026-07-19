@@ -365,6 +365,35 @@ test("non-ephemerkey generator: authenticator with a linked QR key", async ({ pa
   await expect(page.getByTestId("auth-count")).toContainText("Authenticator apps — 1");
 });
 
+test("config linter flags two rituals sharing a key (unreachable ritual)", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("owner-import").setInputFiles({
+    name: "owner.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(keyfile),
+  });
+  await expect(page.getByTestId("set-id")).toHaveText(setId);
+
+  // A synthetic device page self-creates a clean default config (1 key,
+  // 1 slot). Add a second key and a second ritual.
+  await page.goto("/device/1111111111111111111111aa");
+  await page.getByTestId("step-keys").click();
+  await page.getByTestId("cfg-add-key").click();
+  await page.getByTestId("step-rituals").click();
+  await page.getByTestId("cfg-add-slot").click();
+
+  // Both rituals default to key 0 → the second is unreachable.
+  await page.getByTestId("step-review").click();
+  await expect(page.getByTestId("cfg-lint-error")).toContainText("can never advance on this key");
+
+  // Give ritual 1 its own key → clean.
+  await page.getByTestId("step-rituals").click();
+  await page.getByTestId("slot-tab-1").click();
+  await page.getByTestId("slot-1-key").selectOption("1");
+  await page.getByTestId("step-review").click();
+  await expect(page.getByTestId("cfg-lint-error")).toHaveCount(0);
+});
+
 test("keyfile import from another browser recovers the pool + configs", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("owner-import").setInputFiles({

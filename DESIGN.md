@@ -200,6 +200,31 @@ The ESP32 also natively speaks Improv-WiFi over its own USB; we keep that
 as a recovery/bring-up fallback but the primary path is the STM32-mediated
 frame above, so one cable and one protocol cover everything.
 
+## Ritual dispatch (how a lock routes an entered code)
+
+A lock-controller runs up to 8 rituals (slots) at once. When a code is
+entered, the engine walks the rituals in order and hands the code to the
+**first** ritual whose key minted it, then stops — a code is consumed by at
+most one ritual. The person entering codes never chooses a ritual; the key
+is the discriminator. Consequences the UI surfaces:
+
+- **Distinct keys per ritual.** Two rituals sharing a key make the later
+  one unreachable — every code for that key is consumed by the lower-index
+  ritual first (even a shut gate returns rather than falling through). The
+  config linter flags this in the review step, because a dead ritual is a
+  silent security downgrade. Two rituals on *different* keys run in parallel
+  and never disturb each other.
+- **Invalid = matches nothing.** A code that matches no ritual at all is
+  "invalid." Only then does the reset fire — and it resets **every** ritual
+  with `reset_on_invalid` set, not just one. That is collective punishment
+  for a probe or fat-finger; each ritual opts in separately (turn it off to
+  let a ritual survive another&apos;s mistakes). A valid code for ritual A is
+  never "invalid," so it never resets ritual B.
+- **Decoy vs invalid.** A decoy (poison) code for a ritual&apos;s key is a
+  distinct signal — the squeezed-generator tripwire — and applies that
+  ritual&apos;s configured negative action (reset / lockout / silent). It is
+  not the same path as an invalid code.
+
 ## Forward compatibility & critical features
 
 Every layer tolerates unknown additions (CBOR header labels, JSON fields,

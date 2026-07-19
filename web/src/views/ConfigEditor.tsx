@@ -10,6 +10,7 @@ import {
   QUORUM_UNPACED_MAX,
   configFeatures,
   defaultChain,
+  lintConfig,
   defaultCalendar,
   defaultKey,
   defaultPolicy,
@@ -593,7 +594,11 @@ function SlotEditor({
             <option value="lockout">lockout</option>
             <option value="silent">silent — no reaction</option>
           </select>
-          <span className="fieldhelp">silent gives an observer nothing to learn from</span>
+          <span className="fieldhelp">
+            this fires on a DECOY code for this ritual&apos;s key (the squeezed-generator tripwire) —
+            distinct from an invalid code, which resets progress. Silent gives an observer nothing
+            to learn from
+          </span>
         </label>
         {negKind === "lockout" && (
           <Num label="lockout secs" value={lockoutSecs} testid={`slot-${idx}-lockout`} help="dead time after a wrong code" onChange={(v) => onChange({ ...s, negative: `lockout:${v}` })} />
@@ -650,7 +655,11 @@ function SlotEditor({
         <label className="field">
           reset on invalid
           <input type="checkbox" checked={s.reset_on_invalid} onChange={(e) => onChange({ ...s, reset_on_invalid: e.target.checked })} />
-          <span className="fieldhelp">any invalid code wipes partial sequence progress</span>
+          <span className="fieldhelp">
+            an <em>invalid</em> code is one that matches NO ritual on this lock (a probe or
+            fat-finger, not just a wrong step here). When one is entered, every ritual with this box
+            checked is reset together — leave it off to let this ritual survive others&apos; mistakes
+          </span>
         </label>
         <label className="field">
           zone gate
@@ -1009,8 +1018,11 @@ export default function ConfigEditor({
         <div className="step">
           <p className="stephint">
             Each <strong>ritual</strong> (slot) is an independent rule: which key it listens to, how
-            its codes must be entered, and what happens on success. Every entered code is tried
-            against every ritual — up to 8 run in parallel.
+            its codes must be entered, and what happens on success. The person entering codes never
+            picks a ritual — the engine routes each code by <strong>which key minted it</strong> to
+            the first ritual that listens for that key. So give every ritual its own key; two
+            rituals sharing a key makes the second unreachable. Rituals on different keys run in
+            parallel (up to 8) and a valid code for one never disturbs another&apos;s progress.
           </p>
           <div className="row slot-tabs">
             {cfg.slots.map((s, i) => (
@@ -1084,6 +1096,12 @@ export default function ConfigEditor({
               ))}
             </ol>
           )}
+          {lintConfig(cfg).map((issue, i) => (
+            <p key={i} className={`inline-status ${issue.level === "error" ? "err" : "ok"}`} data-testid={`cfg-lint-${issue.level}`}>
+              {issue.level === "error" ? "⚠ " : "note: "}
+              {issue.msg}
+            </p>
+          ))}
           {configFeatures(cfg).length > 0 && (
             <p className="hint" data-testid="cfg-crit">
               Requires device support for: <strong>{configFeatures(cfg).join(", ")}</strong> — a

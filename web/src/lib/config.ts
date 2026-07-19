@@ -247,3 +247,51 @@ export function configFeatures(cfg: DeviceConfig): string[] {
   }
   return [...f].sort();
 }
+
+/** The keys a slot can match a code against (its dispatch keys). */
+export function slotKeys(s: SlotDef): number[] {
+  if (s.policy.type === "path") return [...new Set(s.policy.leg_keys)];
+  if (s.policy.type === "quorum") return [...new Set(s.policy.keys)];
+  return [s.key];
+}
+
+export interface LintIssue {
+  level: "error" | "warn";
+  msg: string;
+}
+
+/** Config sanity for a lock-controller. The engine dispatches a code to the
+ *  FIRST slot (by index) whose key matches, then stops — so two slots that
+ *  share a key make the later one unreachable (silent: a ritual the manager
+ *  believes is armed can never fire). Rituals are told apart by key, never
+ *  chosen by the person entering codes. */
+export function lintConfig(cfg: DeviceConfig): LintIssue[] {
+  if (cfg.role !== 2) return [];
+  const issues: LintIssue[] = [];
+  const owners = new Map<number, number[]>(); // key index -> slot indices
+  cfg.slots.forEach((s, si) => {
+    for (const k of slotKeys(s)) {
+      const list = owners.get(k) ?? [];
+      list.push(si);
+      owners.set(k, list);
+    }
+  });
+  for (const [k, slotsUsing] of owners) {
+    if (slotsUsing.length > 1) {
+      const [first, ...rest] = slotsUsing;
+      issues.push({
+        level: "error",
+        msg: `key ${k} feeds rituals ${slotsUsing.join(" & ")}: a code for it only ever reaches ritual ${first} (lowest index) — ritual(s) ${rest.join(", ")} can never advance on this key. Give each ritual its own key.`,
+      });
+    }
+  }
+  cfg.slots.forEach((s, si) => {
+    if (s.policy.type === "quorum" && s.policy.keys.length < s.policy.m) {
+      issues.push({ level: "error", msg: `ritual ${si}: quorum needs ${s.policy.m} keys but only ${s.policy.keys.length} are listed — it can never complete.` });
+    }
+    if (s.policy.type === "path" && s.policy.leg_keys.length < 2) {
+      issues.push({ level: "warn", msg: `ritual ${si}: a walk-the-path with fewer than 2 legs is just a single-code check.` });
+    }
+  });
+  return issues;
+}
