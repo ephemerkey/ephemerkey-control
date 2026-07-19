@@ -77,6 +77,11 @@ function KeyRow({
         />
       </label>
       <Num label="digits" value={k.digits} min={4} max={10} testid={`key-${idx}-digits`} onChange={(v) => onChange({ ...k, digits: v })} />
+      <button data-testid={`key-${idx}-remove`} className="danger" onClick={onRemove}>
+        remove key
+      </button>
+      <details className="advanced">
+        <summary data-testid={`key-${idx}-adv`}>advanced (decoy, display ritual)</summary>
       <label className="field">
         decoy twin
         <select
@@ -137,9 +142,7 @@ function KeyRow({
           <Num label="gap_min_s" value={d.gap_min_s} onChange={(v) => onChange({ ...k, display: { ...d, gap_min_s: v } })} />
         </>
       )}
-      <button data-testid={`key-${idx}-remove`} onClick={onRemove}>
-        remove key
-      </button>
+      </details>
     </fieldset>
   );
 }
@@ -278,6 +281,11 @@ function SlotRow({
         </select>
       </label>
       <PolicyEditor p={s.policy} idx={idx} keyCount={keyCount} onChange={(policy) => onChange({ ...s, policy })} />
+      <button data-testid={`slot-${idx}-remove`} className="danger" onClick={onRemove}>
+        remove slot
+      </button>
+      <details className="advanced">
+        <summary data-testid={`slot-${idx}-adv`}>advanced (feedback, wrong-code reaction, gates)</summary>
       <label className="field">
         progress feedback
         <input type="checkbox" checked={s.progress} onChange={(e) => onChange({ ...s, progress: e.target.checked })} />
@@ -349,9 +357,7 @@ function SlotRow({
           }
         />
       </label>
-      <button data-testid={`slot-${idx}-remove`} onClick={onRemove}>
-        remove slot
-      </button>
+      </details>
     </fieldset>
   );
 }

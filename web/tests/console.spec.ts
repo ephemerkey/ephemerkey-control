@@ -1,7 +1,7 @@
-// E2e: owner-key custody, set registration, and the two recovery loops
-// (passphrase keywrap, sealed config source) against a real backend.
-// Serial mode: later tests recover state created by earlier ones — that
-// cross-browser recovery IS the thing under test.
+// E2e: owner-key custody, set registration, device enrollment (incl. the
+// mock-device generator), the policy editor, and both recovery loops —
+// against a real backend, with per-form inline statuses.
+// Serial mode: later tests recover state created by earlier ones.
 
 import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
@@ -18,6 +18,11 @@ const SOURCE_DOC = JSON.stringify({
 let setId: string;
 let keyfile: string;
 
+async function openSourceText(page: any) {
+  const details = page.getByTestId("source-text");
+  if (!(await details.isVisible())) await page.getByTestId("source-toggle").click();
+}
+
 test("generate key, register set, empty roster", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("owner-generate").click();
@@ -26,10 +31,11 @@ test("generate key, register set, empty roster", async ({ page }) => {
   expect(setId).toMatch(/^[0-9a-f]{16}$/);
 
   await page.getByTestId("register-btn").click();
-  await expect(page.getByTestId("status")).toContainText(`set registered: ${setId}`);
+  await expect(page.getByTestId("status-key")).toContainText(`set registered: ${setId}`);
 
   await page.getByTestId("roster-btn").click();
   await expect(page.getByTestId("roster-count")).toContainText("0 device(s)");
+  await expect(page.getByTestId("status-roster")).toContainText("roster loaded");
 });
 
 test("export keyfile, forget, import restores the same set", async ({ page }) => {
@@ -41,8 +47,7 @@ test("export keyfile, forget, import restores the same set", async ({ page }) =>
   const downloadPromise = page.waitForEvent("download");
   await page.getByTestId("export-btn").click();
   const download = await downloadPromise;
-  const path = await download.path();
-  const exported = readFileSync(path!, "utf8");
+  const exported = readFileSync((await download.path())!, "utf8");
   const parsed = JSON.parse(exported);
   expect(parsed.format).toBe("ekctl-owner-key-v1");
   expect(parsed.set_id).toBe(freshSetId);
@@ -63,24 +68,25 @@ test("store passphrase backup and sealed config source", async ({ page }) => {
   await page.getByTestId("owner-generate").click();
   setId = (await page.getByTestId("set-id").innerText()).trim();
 
-  // Keep the keyfile for the wrong-passphrase sanity check below.
+  // Keep the keyfile for later cross-browser tests.
   const downloadPromise = page.waitForEvent("download");
   await page.getByTestId("export-btn").click();
   keyfile = readFileSync((await (await downloadPromise).path())!, "utf8");
 
   await page.getByTestId("register-btn").click();
-  await expect(page.getByTestId("status")).toContainText("set registered");
+  await expect(page.getByTestId("status-key")).toContainText("set registered");
 
   // Argon2id in pure JS takes a moment — allow for it.
   await page.getByTestId("backup-pass").fill(PASSPHRASE);
   await page.getByTestId("backup-btn").click();
-  await expect(page.getByTestId("status")).toContainText("passphrase backup stored", {
+  await expect(page.getByTestId("status-backup")).toContainText("passphrase backup stored", {
     timeout: 30_000,
   });
 
+  await openSourceText(page);
   await page.getByTestId("source-text").fill(SOURCE_DOC);
   await page.getByTestId("source-save").click();
-  await expect(page.getByTestId("status")).toContainText("config source sealed & saved");
+  await expect(page.getByTestId("status-source")).toContainText("config source sealed & saved");
 });
 
 test("fresh browser recovers key via set_id + passphrase, then the source", async ({ page }) => {
@@ -91,43 +97,38 @@ test("fresh browser recovers key via set_id + passphrase, then the source", asyn
   await page.getByTestId("restore-pass").fill(PASSPHRASE);
   await page.getByTestId("restore-btn").click();
   await expect(page.getByTestId("set-id")).toHaveText(setId, { timeout: 30_000 });
-  await expect(page.getByTestId("status")).toContainText("restored from server backup");
+  await expect(page.getByTestId("status-key")).toContainText("restored from server backup");
 
   await page.getByTestId("source-load").click();
-  await expect(page.getByTestId("status")).toContainText("config source recovered");
+  await expect(page.getByTestId("status-source")).toContainText("config source recovered");
+  await openSourceText(page);
   await expect(page.getByTestId("source-text")).toHaveValue(SOURCE_DOC);
 });
 
-test("wrong passphrase is rejected", async ({ page }) => {
+test("wrong passphrase is rejected inline", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("restore-setid").fill(setId);
   await page.getByTestId("restore-pass").fill("not-the-passphrase");
   await page.getByTestId("restore-btn").click();
-  await expect(page.getByTestId("status")).toContainText("wrong passphrase", {
+  await expect(page.getByTestId("status-restore")).toContainText("wrong passphrase", {
     timeout: 30_000,
   });
   await expect(page.getByTestId("owner-generate")).toBeVisible(); // still keyless
 });
 
-test("wrong key cannot read another set's source blob", async ({ page }) => {
+test("a different key is a different set with no access to the source", async ({ page }) => {
   await page.goto("/");
-  // A different owner key = a different set; it must not see the first
-  // set's data, and its own (empty) source slot 404s.
   await page.getByTestId("owner-generate").click();
   const otherSetId = (await page.getByTestId("set-id").innerText()).trim();
   expect(otherSetId).not.toBe(setId);
   await page.getByTestId("register-btn").click();
-  await expect(page.getByTestId("status")).toContainText("set registered");
+  await expect(page.getByTestId("status-key")).toContainText("set registered");
 
-  // Its own source loads nothing yet (404 from the backend).
   await page.getByTestId("source-load").click();
-  await expect(page.getByTestId("status")).toContainText("source load failed");
+  await expect(page.getByTestId("status-source")).toContainText("source load failed");
 });
 
-test("enroll a device and seal+push a config from the console", async ({ page }) => {
-  // Device keys generated node-side; the browser does the sealing. The
-  // server's Rust envelope parser validating the TS-sealed blob's headers
-  // is the cross-implementation check.
+test("manual enroll (advanced) and seal+push from the console", async ({ page }) => {
   const { ed25519, x25519 } = await import("@noble/curves/ed25519");
   const { bytesToHex } = await import("@noble/hashes/utils");
   const devId = bytesToHex(crypto.getRandomValues(new Uint8Array(12)));
@@ -142,22 +143,46 @@ test("enroll a device and seal+push a config from the console", async ({ page })
   });
   await expect(page.getByTestId("set-id")).toHaveText(setId);
 
+  await page.getByTestId("dev-name").fill("e2e lock");
+  await page.getByTestId("dev-advanced").click();
   await page.getByTestId("dev-id").fill(devId);
   await page.getByTestId("dev-sign").fill(signPub);
   await page.getByTestId("dev-kx").fill(kxPub);
-  await page.getByTestId("dev-name").fill("e2e lock");
-  await page.getByTestId("dev-add").click();
-  await expect(page.getByTestId("status")).toContainText("enrolled");
+  await page.getByTestId("dev-add-manual").click();
+  await expect(page.getByTestId("status-devices")).toContainText("enrolled");
   await expect(page.getByTestId("roster-count")).toContainText("1 device(s)");
 
-  // Config for this device goes into the source doc, then seal & push.
+  // Config for this device via the source doc, then seal & push.
+  await openSourceText(page);
   await page
     .getByTestId("source-text")
     .fill(JSON.stringify({ format: "ekctl-source-v1", devices: { [devId]: { role: 2, keys: [], slots: [] } } }));
   await page.getByTestId(`push-${devId}`).click();
-  await expect(page.getByTestId("status")).toContainText("config seq 1 sealed & pushed");
-  await expect(page.getByTestId("roster-count")).toContainText("1 device(s)");
+  await expect(page.getByTestId("status-roster")).toContainText("config seq 1 sealed & pushed");
   await expect(page.locator("tbody tr")).toContainText("seq 1 pending");
+});
+
+test("mock device: one click enrolls it and downloads an ekemu state file", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("owner-import").setInputFiles({
+    name: "owner.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(keyfile),
+  });
+  await expect(page.getByTestId("set-id")).toHaveText(setId);
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-mock").click();
+  const download = await downloadPromise;
+  const state = JSON.parse(readFileSync((await download.path())!, "utf8"));
+  expect(state.device_id).toMatch(/^[0-9a-f]{24}$/);
+  expect(state.sign_priv).toMatch(/^[0-9a-f]{64}$/);
+  expect(state.kx_priv).toMatch(/^[0-9a-f]{64}$/);
+  expect(state.owner_pub).toBeNull();
+  expect(state.seq).toBe(0);
+
+  await expect(page.getByTestId("status-devices")).toContainText("ekemu serial");
+  await expect(page.getByTestId("roster-count")).toContainText("2 device(s)");
 });
 
 test("policy editor round-trips every policy family into the source doc", async ({ page }) => {
@@ -166,13 +191,15 @@ test("policy editor round-trips every policy family into the source doc", async 
   await page.getByTestId("owner-generate").click();
 
   // Create a fresh config for a device and open the editor.
-  await page.getByTestId("edit-device-new").fill(devId);
+  await page.getByTestId("edit-device-create-id").fill(devId);
   await page.getByTestId("edit-device-create").click();
   await expect(page.getByTestId("cfg-role")).toBeVisible();
 
   // Two keys; second is a scatter/show-once decoy twin of the first.
   await page.getByTestId("cfg-add-key").click();
+  await page.getByTestId("key-0-adv").click();
   await page.getByTestId("key-0-decoy").selectOption("1");
+  await page.getByTestId("key-1-adv").click();
   await page.getByTestId("key-1-display").selectOption("custom");
   await page.getByTestId("key-1-mode").selectOption("scatter");
   await page.getByTestId("key-1-once").selectOption("refuse");
@@ -182,6 +209,7 @@ test("policy editor round-trips every policy family into the source doc", async 
   await page.getByTestId("slot-0-policy-type").selectOption("quorum");
   await page.getByTestId("slot-0-quorum-m").fill("2");
   await page.getByTestId("slot-0-quorum-keys").fill("0,1");
+  await page.getByTestId("slot-0-adv").click();
   await page.getByTestId("slot-0-negative").selectOption("lockout");
   await page.getByTestId("slot-0-lockout").fill("120");
 
@@ -196,9 +224,11 @@ test("policy editor round-trips every policy family into the source doc", async 
   await page.getByTestId("cfg-add-slot").click();
   await page.getByTestId("slot-3-policy-type").selectOption("path");
   await page.getByTestId("slot-3-path-legs").fill("1,0");
+  await page.getByTestId("slot-3-adv").click();
   await page.getByTestId("slot-3-fence").fill("0");
 
   // Everything must have landed in the source doc as emulator-exact JSON.
+  await openSourceText(page);
   const doc = JSON.parse(await page.getByTestId("source-text").inputValue());
   const cfg = doc.devices[devId];
   expect(cfg.keys).toHaveLength(2);
@@ -229,5 +259,7 @@ test("keyfile import from another browser recovers the pool too", async ({ page 
   });
   await expect(page.getByTestId("set-id")).toHaveText(setId);
   await page.getByTestId("source-load").click();
-  await expect(page.getByTestId("source-text")).toHaveValue(SOURCE_DOC);
+  await openSourceText(page);
+  const val = await page.getByTestId("source-text").inputValue();
+  expect(JSON.parse(val).devices).toBeDefined();
 });

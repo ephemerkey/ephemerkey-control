@@ -1,11 +1,11 @@
 // Manager console: owner-key custody, set registration, roster, recovery.
 // All authority is the key; anyone you give the keyfile to is a manager.
 // The backend holds the durable copies (sealed source + keywrap); the
-// browser is just a cache.
+// browser is just a cache. Every form reports success/errors inline.
 
 import { useEffect, useState } from "react";
+import { ed25519, x25519 } from "@noble/curves/ed25519";
 import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils";
-import { seal, sign1 } from "../lib/cose";
 import {
   exportKeyFile,
   forgetOwnerKey,
@@ -26,7 +26,9 @@ import {
   signedPost,
 } from "../lib/api";
 import { deriveKx, sealToKx, unsealWithSeed, unwrapKeyfile, wrapKeyfile } from "../lib/backup";
+import { Enrollment, parseEnrollment, seal, sign1 } from "../lib/cose";
 import { defaultDeviceConfig, DeviceConfig } from "../lib/config";
+import { EkSerial, webSerialSupported } from "../lib/serial";
 import ConfigEditor from "./ConfigEditor";
 
 const SOURCE_TEMPLATE = JSON.stringify(
@@ -35,17 +37,51 @@ const SOURCE_TEMPLATE = JSON.stringify(
   2,
 );
 
+type Note = { kind: "ok" | "err"; text: string };
+
+function Status({ id, note }: { id: string; note?: Note }) {
+  if (!note) return null;
+  return (
+    <p className={`inline-status ${note.kind}`} data-testid={`status-${id}`}>
+      {note.text}
+    </p>
+  );
+}
+
+function download(filename: string, text: string) {
+  const blob = new Blob([text], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 export default function Console() {
   const [key, setKey] = useState<OwnerKey | null>(() => loadOwnerKey());
   const [roster, setRoster] = useState<any | null>(null);
-  const [status, setStatus] = useState<string>("");
+  const [notes, setNotes] = useState<Record<string, Note>>({});
   const [backupPass, setBackupPass] = useState("");
   const [restoreSetId, setRestoreSetId] = useState("");
   const [restorePass, setRestorePass] = useState("");
   const [source, setSource] = useState(SOURCE_TEMPLATE);
-  const [devForm, setDevForm] = useState({ device_id: "", sign_pub: "", kx_pub: "", role: 2, name: "" });
+  const [showSource, setShowSource] = useState(false);
   const [editDevice, setEditDevice] = useState("");
-  const [newCfgId, setNewCfgId] = useState("");
+  // add-device flow
+  const [enrollPaste, setEnrollPaste] = useState("");
+  const [parsed, setParsed] = useState<Enrollment | null>(null);
+  const [devName, setDevName] = useState("");
+  const [devRole, setDevRole] = useState(2);
+  const [manual, setManual] = useState({ device_id: "", sign_pub: "", kx_pub: "" });
+
+  const setId = key ? setIdFromPub(key.pub) : null;
+
+  const ok = (id: string, text: string) => setNotes((n) => ({ ...n, [id]: { kind: "ok", text } }));
+  const err = (id: string, text: string) => setNotes((n) => ({ ...n, [id]: { kind: "err", text } }));
+
+  useEffect(() => {
+    setRoster(null);
+  }, [setId]);
 
   // The source doc (JSON string) is the single source of truth; the
   // structured editor reads/writes one device's entry inside it.
@@ -55,7 +91,6 @@ export default function Console() {
   } catch {
     /* editor hidden while the JSON is invalid */
   }
-  const sourceDeviceIds: string[] = parsedSource?.devices ? Object.keys(parsedSource.devices) : [];
   const editingCfg: DeviceConfig | null =
     editDevice && parsedSource?.devices?.[editDevice] ? parsedSource.devices[editDevice] : null;
 
@@ -65,44 +100,31 @@ export default function Console() {
     setSource(JSON.stringify(p, null, 2));
   }
 
-  function createDeviceCfg() {
-    const id = newCfgId.trim().toLowerCase();
-    if (!id || !parsedSource) return;
+  function openEditorFor(id: string) {
+    if (!parsedSource) {
+      err("source", "source doc JSON is invalid — fix it first");
+      return;
+    }
     const p = { format: "ekctl-source-v1", devices: {}, ...parsedSource };
-    p.devices[id] = defaultDeviceConfig(2);
-    setSource(JSON.stringify(p, null, 2));
+    if (!p.devices[id]) {
+      p.devices[id] = defaultDeviceConfig(2);
+      setSource(JSON.stringify(p, null, 2));
+    }
     setEditDevice(id);
-    setNewCfgId("");
   }
-
-  const setId = key ? setIdFromPub(key.pub) : null;
-
-  useEffect(() => {
-    setRoster(null);
-  }, [setId]);
 
   function adopt(k: OwnerKey, how: string) {
     saveOwnerKey(k);
     setKey(k);
-    setStatus(`owner key ${how}`);
+    ok("key", `owner key ${how}`);
   }
 
   async function importFile(file: File) {
     try {
       adopt(importKeyFile(await file.text()), "imported");
     } catch (e) {
-      setStatus(`import failed: ${e}`);
+      err("key", `import failed: ${e}`);
     }
-  }
-
-  function exportFile() {
-    if (!key) return;
-    const blob = new Blob([exportKeyFile(key)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `ekctl-owner-${setId}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
   }
 
   async function registerSet() {
@@ -112,9 +134,9 @@ export default function Console() {
         owner_pub: bytesToHex(key.pub),
         name: null,
       });
-      setStatus(`set registered: ${res.set_id}`);
+      ok("key", `set registered: ${res.set_id}`);
     } catch (e) {
-      setStatus(`register failed: ${e}`);
+      err("key", `register failed: ${e}`);
     }
   }
 
@@ -122,53 +144,113 @@ export default function Console() {
     if (!key || !setId) return;
     try {
       setRoster(await signedGet(key, `/api/sets/${setId}`));
-      setStatus("roster loaded");
+      ok("roster", "roster loaded");
     } catch (e) {
-      setStatus(`roster failed: ${e}`);
+      err("roster", `roster failed: ${e}`);
     }
   }
 
-  async function addDevice() {
+  // --- add device ---------------------------------------------------------
+
+  async function enroll(fields: { device_id: string; sign_pub: string; kx_pub: string }) {
     if (!key || !setId) return;
     try {
       await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/devices`, {
-        ...devForm,
-        device_id: devForm.device_id.trim().toLowerCase(),
-        name: devForm.name || null,
+        device_id: fields.device_id.trim().toLowerCase(),
+        sign_pub: fields.sign_pub.trim().toLowerCase(),
+        kx_pub: fields.kx_pub.trim().toLowerCase(),
+        role: devRole,
+        name: devName || null,
       });
-      const enrolled = devForm.device_id.slice(0, 16);
-      setDevForm({ device_id: "", sign_pub: "", kx_pub: "", role: 2, name: "" });
+      setParsed(null);
+      setEnrollPaste("");
+      setDevName("");
       await loadRoster();
-      setStatus(`device ${enrolled} enrolled`);
+      ok("devices", `device ${fields.device_id.slice(0, 16)}… enrolled`);
     } catch (e) {
-      setStatus(`add device failed: ${e}`);
+      err("devices", `enroll failed: ${e}`);
     }
   }
 
-  /** Sign1(config, owner) sealed to the device kx key, uploaded at next seq.
-   *  Interim payload encoding: UTF-8 JSON of the device's entry in the
-   *  source doc (the emulator's native format) until the integer-keyed
-   *  CBOR config document is pinned. */
-  async function pushConfig(d: any) {
-    if (!key || !setId) return;
+  async function readFromDevice() {
+    let serial: EkSerial | null = null;
     try {
-      const parsed = JSON.parse(source);
-      const cfg = parsed.devices?.[d.device_id];
-      if (!cfg) throw new Error(`source doc has no devices["${d.device_id}"]`);
-      const seq = Math.max(d.latest_seq ?? 0, d.acked_seq ?? 0) + 1;
-      // kid = owner_pub: carries the owner binding for TOFU enrollment
-      // (a factory-fresh device adopts the first owner it hears).
-      const inner = sign1(utf8ToBytes(JSON.stringify(cfg)), key.pub, key.priv);
-      const sealed = seal(inner, hexToBytes(d.kx_pub), seq, hexToBytes(d.device_id));
-      await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/configs`, {
-        device_id: d.device_id,
-        seq,
-        blob_b64: btoa(String.fromCharCode(...sealed)),
-      });
-      await loadRoster();
-      setStatus(`config seq ${seq} sealed & pushed for ${d.device_id.slice(0, 16)}`);
+      const port = await navigator.serial.requestPort();
+      serial = new EkSerial(port);
+      await serial.open();
+      const enrollment = parseEnrollment(await serial.identify());
+      setParsed(enrollment);
+      ok("devices", `read identity of ${bytesToHex(enrollment.deviceId)} (fw ${enrollment.fw})`);
     } catch (e) {
-      setStatus(`push failed: ${e}`);
+      err("devices", `device read failed: ${e}`);
+    } finally {
+      await serial?.close().catch(() => {});
+    }
+  }
+
+  function parsePaste() {
+    try {
+      const text = enrollPaste.trim();
+      let bytes: Uint8Array;
+      if (/^[0-9a-fA-F\s]+$/.test(text)) {
+        bytes = hexToBytes(text.replace(/\s/g, ""));
+      } else {
+        const bin = atob(text);
+        bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      }
+      const enrollment = parseEnrollment(bytes);
+      setParsed(enrollment);
+      ok("devices", `parsed identity of ${bytesToHex(enrollment.deviceId)} (fw ${enrollment.fw})`);
+    } catch (e) {
+      err("devices", `could not parse enrollment doc: ${e}`);
+    }
+  }
+
+  /** Enroll a fabricated device and download its ekemu-compatible state
+   *  file: `ekemu serial <file>` turns it into a live emulated device. */
+  async function addMockDevice() {
+    if (!key || !setId) return;
+    const deviceId = crypto.getRandomValues(new Uint8Array(12));
+    const signPriv = ed25519.utils.randomPrivateKey();
+    const kxPriv = crypto.getRandomValues(new Uint8Array(32));
+    const idHex = bytesToHex(deviceId);
+    try {
+      await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/devices`, {
+        device_id: idHex,
+        sign_pub: bytesToHex(ed25519.getPublicKey(signPriv)),
+        kx_pub: bytesToHex(x25519.getPublicKey(kxPriv)),
+        role: devRole,
+        name: devName || `mock ${idHex.slice(0, 6)}`,
+      });
+      download(
+        `ekemu-${idHex.slice(0, 8)}.json`,
+        JSON.stringify(
+          {
+            device_id: idHex,
+            sign_priv: bytesToHex(signPriv),
+            kx_priv: bytesToHex(kxPriv),
+            fw: "ekemu-0.1",
+            owner_pub: null,
+            seq: 0,
+            config_b64: null,
+            event_seq: 0,
+            events: [],
+            wifi_ssid: null,
+            wifi_psk: null,
+          },
+          null,
+          2,
+        ),
+      );
+      setDevName("");
+      await loadRoster();
+      ok(
+        "devices",
+        `mock device ${idHex.slice(0, 16)}… enrolled — run: ekemu serial ekemu-${idHex.slice(0, 8)}.json`,
+      );
+    } catch (e) {
+      err("devices", `mock device failed: ${e}`);
     }
   }
 
@@ -180,9 +262,9 @@ export default function Console() {
       const wrapped = wrapKeyfile(exportKeyFile(key), backupPass);
       await putKeywrapBlob(key, setId, wrapped);
       setBackupPass("");
-      setStatus("passphrase backup stored on server");
+      ok("backup", "passphrase backup stored on server");
     } catch (e) {
-      setStatus(`backup failed: ${e}`);
+      err("backup", `backup failed: ${e}`);
     }
   }
 
@@ -197,7 +279,7 @@ export default function Console() {
       setRestorePass("");
       adopt(restored, "restored from server backup");
     } catch (e) {
-      setStatus(`restore failed: ${e}`);
+      err("restore", `restore failed: ${e}`);
     }
   }
 
@@ -209,9 +291,9 @@ export default function Console() {
       JSON.parse(source); // syntax check before sealing
       const sealed = sealToKx(deriveKx(key.priv).pub, utf8ToBytes(source));
       const res = await putSourceBlob(key, setId, sealed);
-      setStatus(`config source sealed & saved (${res.size} bytes)`);
+      ok("source", `config source sealed & saved (${res.size} bytes)`);
     } catch (e) {
-      setStatus(`source save failed: ${e}`);
+      err("source", `source save failed: ${e}`);
     }
   }
 
@@ -220,28 +302,52 @@ export default function Console() {
     try {
       const sealed = await getSourceBlob(key, setId);
       setSource(new TextDecoder().decode(unsealWithSeed(key.priv, sealed)));
-      setStatus("config source recovered from server");
+      ok("source", "config source recovered from server");
     } catch (e) {
-      setStatus(`source load failed: ${e}`);
+      err("source", `source load failed: ${e}`);
     }
   }
 
-  return (
-    <section>
-      <h2>Manager console</h2>
+  async function pushConfig(d: any) {
+    if (!key || !setId) return;
+    try {
+      const parsedDoc = JSON.parse(source);
+      const cfg = parsedDoc.devices?.[d.device_id];
+      if (!cfg) throw new Error(`no config for this device yet — open its policies first`);
+      const seq = Math.max(d.latest_seq ?? 0, d.acked_seq ?? 0) + 1;
+      // kid = owner_pub: carries the owner binding for TOFU enrollment.
+      const inner = sign1(utf8ToBytes(JSON.stringify(cfg)), key.pub, key.priv);
+      const sealed = seal(inner, hexToBytes(d.kx_pub), seq, hexToBytes(d.device_id));
+      await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/configs`, {
+        device_id: d.device_id,
+        seq,
+        blob_b64: btoa(String.fromCharCode(...sealed)),
+      });
+      await loadRoster();
+      ok("roster", `config seq ${seq} sealed & pushed for ${d.device_id.slice(0, 16)}…`);
+    } catch (e) {
+      err("roster", `push failed: ${e}`);
+    }
+  }
 
-      {!key ? (
-        <>
-          <div className="card">
-            <p>
-              No owner key. The owner key <em>is</em> the pool: generate one to create a new set,
-              or import a keyfile a co-manager sent you.
-            </p>
-            <button data-testid="owner-generate" onClick={() => adopt(generateOwnerKey(), "generated")}>
+  // --- render -------------------------------------------------------------
+
+  if (!key) {
+    return (
+      <section>
+        <h2>Manager console</h2>
+        <div className="card">
+          <h3>Owner key</h3>
+          <p>
+            No owner key. The owner key <em>is</em> the pool: generate one to create a new set, or
+            import a keyfile a co-manager sent you.
+          </p>
+          <div className="row">
+            <button className="primary" data-testid="owner-generate" onClick={() => adopt(generateOwnerKey(), "generated")}>
               Generate owner key
-            </button>{" "}
+            </button>
             <label className="filebtn">
-              Import keyfile
+              Import keyfile…
               <input
                 data-testid="owner-import"
                 type="file"
@@ -251,167 +357,180 @@ export default function Console() {
               />
             </label>
           </div>
-          <div className="card">
-            <h3>Restore from server backup</h3>
-            <p>If a passphrase backup was stored for your set:</p>
+          <Status id="key" note={notes.key} />
+        </div>
+        <div className="card">
+          <h3>Restore from server backup</h3>
+          <p>If a passphrase backup was stored for your set:</p>
+          <div className="row">
             <input
               data-testid="restore-setid"
               placeholder="set_id (16 hex chars)"
               value={restoreSetId}
               onChange={(e) => setRestoreSetId(e.target.value)}
-            />{" "}
+            />
             <input
               data-testid="restore-pass"
               type="password"
               placeholder="passphrase"
               value={restorePass}
               onChange={(e) => setRestorePass(e.target.value)}
-            />{" "}
+            />
             <button data-testid="restore-btn" onClick={restoreFromKeywrap}>
               Restore key
             </button>
           </div>
-        </>
-      ) : (
-        <>
-          <div className="card">
-            <p>
-              <strong>set_id</strong> <code data-testid="set-id">{setId}</code>
-              <br />
-              <strong>owner_pub</strong> <code>{bytesToHex(key.pub)}</code>
-            </p>
-            <button data-testid="register-btn" onClick={registerSet}>
-              Register set on backend
-            </button>{" "}
-            <button data-testid="roster-btn" onClick={loadRoster}>
-              Load roster
-            </button>{" "}
-            <button data-testid="export-btn" onClick={exportFile}>
-              Export keyfile
-            </button>{" "}
-            <button
-              data-testid="forget-btn"
-              onClick={() => {
-                forgetOwnerKey();
-                setKey(null);
-                setStatus("key forgotten (this browser only)");
-              }}
-            >
-              Forget key
-            </button>
-          </div>
+          <Status id="restore" note={notes.restore} />
+        </div>
+      </section>
+    );
+  }
 
-          <div className="card">
-            <h3>Add device</h3>
-            <p>Paste the enrollment doc fields from a device in provisioning mode.</p>
+  return (
+    <section>
+      <h2>Manager console</h2>
+
+      <div className="card">
+        <h3>Owner key</h3>
+        <p>
+          <strong>set_id</strong> <code data-testid="set-id">{setId}</code>
+        </p>
+        <div className="row">
+          <button className="primary" data-testid="register-btn" onClick={registerSet}>
+            Register set on backend
+          </button>
+          <button data-testid="roster-btn" onClick={loadRoster}>
+            Load roster
+          </button>
+          <button
+            data-testid="export-btn"
+            onClick={() => download(`ekctl-owner-${setId}.json`, exportKeyFile(key))}
+          >
+            Export keyfile
+          </button>
+          <button
+            data-testid="forget-btn"
+            onClick={() => {
+              forgetOwnerKey();
+              setKey(null);
+              setNotes({});
+            }}
+          >
+            Forget key
+          </button>
+        </div>
+        <details className="advanced">
+          <summary>details</summary>
+          <p>
+            <strong>owner_pub</strong> <code>{bytesToHex(key.pub)}</code>
+          </p>
+        </details>
+        <Status id="key" note={notes.key} />
+      </div>
+
+      <div className="card">
+        <h3>Passphrase backup</h3>
+        <p>
+          Stores your keyfile on the server, encrypted under a passphrase (Argon2id). Without any
+          backup, losing this browser means physically re-enrolling every device.
+        </p>
+        <div className="row">
+          <input
+            data-testid="backup-pass"
+            type="password"
+            placeholder="passphrase (min 8 chars)"
+            value={backupPass}
+            onChange={(e) => setBackupPass(e.target.value)}
+          />
+          <button data-testid="backup-btn" onClick={storeKeywrap}>
+            Store backup on server
+          </button>
+        </div>
+        <Status id="backup" note={notes.backup} />
+      </div>
+
+      <div className="card">
+        <h3>Add device</h3>
+        <p>Get the enrollment doc from a device in provisioning mode, then enroll it.</p>
+        <div className="row">
+          {webSerialSupported() && (
+            <button className="primary" data-testid="dev-read" onClick={readFromDevice}>
+              Read from device (WebSerial)
+            </button>
+          )}
+          <input
+            data-testid="dev-paste"
+            placeholder="…or paste enrollment doc (hex / base64)"
+            value={enrollPaste}
+            onChange={(e) => setEnrollPaste(e.target.value)}
+          />
+          <button data-testid="dev-parse" onClick={parsePaste}>
+            Parse
+          </button>
+        </div>
+        {parsed && (
+          <div className="preview" data-testid="dev-preview">
+            <code>{bytesToHex(parsed.deviceId)}</code> · fw {parsed.fw} · self-signature verified ✓
+          </div>
+        )}
+        <div className="row">
+          <input
+            data-testid="dev-name"
+            placeholder="name (e.g. front door)"
+            value={devName}
+            onChange={(e) => setDevName(e.target.value)}
+          />
+          <select data-testid="dev-role" value={devRole} onChange={(e) => setDevRole(Number(e.target.value))}>
+            <option value={1}>generator</option>
+            <option value={2}>lock-controller</option>
+          </select>
+          <button
+            className="primary"
+            data-testid="dev-add"
+            disabled={!parsed}
+            onClick={() =>
+              parsed &&
+              enroll({
+                device_id: bytesToHex(parsed.deviceId),
+                sign_pub: bytesToHex(parsed.signPub),
+                kx_pub: bytesToHex(parsed.kxPub),
+              })
+            }
+          >
+            Enroll device
+          </button>
+          <button data-testid="dev-mock" onClick={addMockDevice}>
+            Create mock device
+          </button>
+        </div>
+        <details className="advanced">
+          <summary data-testid="dev-advanced">manual entry</summary>
+          <div className="row">
             <input
               data-testid="dev-id"
               placeholder="device_id (hex)"
-              value={devForm.device_id}
-              onChange={(e) => setDevForm({ ...devForm, device_id: e.target.value })}
-            />{" "}
+              value={manual.device_id}
+              onChange={(e) => setManual({ ...manual, device_id: e.target.value })}
+            />
             <input
               data-testid="dev-sign"
-              placeholder="sign_pub (hex, 64 chars)"
-              value={devForm.sign_pub}
-              onChange={(e) => setDevForm({ ...devForm, sign_pub: e.target.value })}
-            />{" "}
+              placeholder="sign_pub (64 hex)"
+              value={manual.sign_pub}
+              onChange={(e) => setManual({ ...manual, sign_pub: e.target.value })}
+            />
             <input
               data-testid="dev-kx"
-              placeholder="kx_pub (hex, 64 chars)"
-              value={devForm.kx_pub}
-              onChange={(e) => setDevForm({ ...devForm, kx_pub: e.target.value })}
-            />{" "}
-            <select
-              data-testid="dev-role"
-              value={devForm.role}
-              onChange={(e) => setDevForm({ ...devForm, role: Number(e.target.value) })}
-            >
-              <option value={1}>generator</option>
-              <option value={2}>lock-controller</option>
-            </select>{" "}
-            <input
-              data-testid="dev-name"
-              placeholder="name"
-              value={devForm.name}
-              onChange={(e) => setDevForm({ ...devForm, name: e.target.value })}
-            />{" "}
-            <button data-testid="dev-add" onClick={addDevice}>
-              Enroll device
-            </button>
-          </div>
-
-          <div className="card">
-            <h3>Passphrase backup</h3>
-            <p>
-              Stores your keyfile on the server, encrypted under a passphrase (Argon2id). Recover
-              on any browser with set_id + passphrase. Without any backup, losing this browser
-              means physically re-enrolling every device.
-            </p>
-            <input
-              data-testid="backup-pass"
-              type="password"
-              placeholder="passphrase (min 8 chars)"
-              value={backupPass}
-              onChange={(e) => setBackupPass(e.target.value)}
-            />{" "}
-            <button data-testid="backup-btn" onClick={storeKeywrap}>
-              Store backup on server
-            </button>
-          </div>
-
-          <div className="card">
-            <h3>Config source</h3>
-            <p>
-              The pool&apos;s source-of-truth. Saved sealed to your owner key — the server cannot
-              read it; any browser with your key can recover it.
-            </p>
-            <textarea
-              data-testid="source-text"
-              rows={10}
-              style={{ width: "100%", fontFamily: "monospace" }}
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
+              placeholder="kx_pub (64 hex)"
+              value={manual.kx_pub}
+              onChange={(e) => setManual({ ...manual, kx_pub: e.target.value })}
             />
-            <div>
-              <button data-testid="source-save" onClick={saveSource}>
-                Seal &amp; save to server
-              </button>{" "}
-              <button data-testid="source-load" onClick={loadSource}>
-                Recover from server
-              </button>
-            </div>
-            <hr />
-            <h4>Policy editor</h4>
-            <label className="field">
-              edit device
-              <select
-                data-testid="edit-device"
-                value={editDevice}
-                onChange={(e) => setEditDevice(e.target.value)}
-              >
-                <option value="">—</option>
-                {sourceDeviceIds.map((id) => (
-                  <option key={id} value={id}>
-                    {id.slice(0, 16)}
-                  </option>
-                ))}
-              </select>
-            </label>{" "}
-            <input
-              data-testid="edit-device-new"
-              placeholder="device_id for a new config"
-              value={newCfgId}
-              onChange={(e) => setNewCfgId(e.target.value)}
-            />{" "}
-            <button data-testid="edit-device-create" onClick={createDeviceCfg} disabled={!parsedSource}>
-              New config
+            <button data-testid="dev-add-manual" onClick={() => enroll(manual)}>
+              Enroll (manual)
             </button>
-            {!parsedSource && <p className="status">source doc JSON is invalid — fix it to use the editor</p>}
-            {editingCfg && <ConfigEditor cfg={editingCfg} onChange={updateEditingCfg} />}
           </div>
-        </>
-      )}
+        </details>
+        <Status id="devices" note={notes.devices} />
+      </div>
 
       {roster && (
         <div className="card">
@@ -421,7 +540,6 @@ export default function Console() {
               <tr>
                 <th>device</th>
                 <th>role</th>
-                <th>fw</th>
                 <th>last seen</th>
                 <th>config</th>
                 <th></th>
@@ -434,14 +552,16 @@ export default function Console() {
                     <code>{d.device_id.slice(0, 16)}</code> {d.name}
                   </td>
                   <td>{d.role === 1 ? "generator" : "lock"}</td>
-                  <td>{d.fw ?? "—"}</td>
                   <td>{d.last_seen_at ? new Date(d.last_seen_at * 1000).toLocaleString() : "never"}</td>
                   <td>
-                    acked seq {d.acked_seq}
-                    {d.latest_seq > d.acked_seq ? ` (seq ${d.latest_seq} pending)` : ""}
+                    acked {d.acked_seq}
+                    {d.latest_seq > d.acked_seq ? ` · seq ${d.latest_seq} pending` : ""}
                   </td>
-                  <td>
-                    <button data-testid={`push-${d.device_id}`} onClick={() => pushConfig(d)}>
+                  <td className="row">
+                    <button data-testid={`edit-${d.device_id}`} onClick={() => openEditorFor(d.device_id)}>
+                      Policies
+                    </button>
+                    <button className="primary" data-testid={`push-${d.device_id}`} onClick={() => pushConfig(d)}>
                       Seal &amp; push
                     </button>
                   </td>
@@ -449,19 +569,80 @@ export default function Console() {
               ))}
             </tbody>
           </table>
+          <Status id="roster" note={notes.roster} />
         </div>
       )}
 
-      {status && (
-        <p className="status" data-testid="status">
-          {status}
-        </p>
-      )}
-
-      <p className="hint">
-        Next up here: enroll devices over WebSerial (provisioning mode), the slot/policy editor, and
-        Review &amp; sign → seal per device. See DESIGN.md.
-      </p>
+      <div className="card">
+        <h3>Config &amp; policies</h3>
+        {editDevice ? (
+          <p>
+            Editing <code>{editDevice.slice(0, 16)}</code> —{" "}
+            <a data-testid="edit-close" onClick={() => setEditDevice("")}>
+              close editor
+            </a>
+          </p>
+        ) : (
+          <p>Pick a device in the roster (Policies) or create a config below.</p>
+        )}
+        <div className="row">
+          <NewConfig disabled={!parsedSource} onCreate={openEditorFor} />
+        </div>
+        {!parsedSource && (
+          <p className="inline-status err">source doc JSON is invalid — fix it to use the editor</p>
+        )}
+        {editingCfg && <ConfigEditor cfg={editingCfg} onChange={updateEditingCfg} />}
+        <details
+          className="advanced"
+          open={showSource}
+          onToggle={(e) => setShowSource((e.target as HTMLDetailsElement).open)}
+        >
+          <summary data-testid="source-toggle">source doc (JSON)</summary>
+          <p>
+            The pool&apos;s source-of-truth. Saved sealed to your owner key — the server cannot read
+            it; any browser with your key can recover it.
+          </p>
+          <textarea
+            data-testid="source-text"
+            rows={10}
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+          />
+        </details>
+        <div className="row">
+          <button className="primary" data-testid="source-save" onClick={saveSource}>
+            Seal &amp; save to server
+          </button>
+          <button data-testid="source-load" onClick={loadSource}>
+            Recover from server
+          </button>
+        </div>
+        <Status id="source" note={notes.source} />
+      </div>
     </section>
+  );
+}
+
+function NewConfig({ disabled, onCreate }: { disabled: boolean; onCreate: (id: string) => void }) {
+  const [id, setId] = useState("");
+  return (
+    <>
+      <input
+        data-testid="edit-device-create-id"
+        placeholder="device_id for a new config"
+        value={id}
+        onChange={(e) => setId(e.target.value)}
+      />
+      <button
+        data-testid="edit-device-create"
+        disabled={disabled || !id.trim()}
+        onClick={() => {
+          onCreate(id.trim().toLowerCase());
+          setId("");
+        }}
+      >
+        New config
+      </button>
+    </>
   );
 }
