@@ -254,6 +254,7 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await expect(review).toContainText("paced 60\u2013300s apart");
   await expect(review).toContainText("jitter up to 45s");
   await expect(review).toContainText("only inside zone 'workshop'");
+  await expect(page.getByTestId("cfg-crit")).toContainText("quorum-pace, seq-jitter, zones");
   await page.getByTestId("cfg-push").click();
   await expect(page.getByTestId("status-push")).toContainText("sealed & pushed");
 

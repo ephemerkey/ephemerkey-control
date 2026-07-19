@@ -176,7 +176,17 @@ export class EkSerial {
     await this.writer!.write(encodeFrame(type, payload));
     const resp = await this.nextFrame(timeoutMs);
     if (resp.type === FrameType.Error) {
-      throw new Error(`device error code ${resp.payload[0] ?? -1}`);
+      const code = resp.payload[0] ?? -1;
+      const reasons: Record<number, string> = {
+        1: "device is in the wrong state",
+        2: "signature rejected by the device",
+        3: "sequence rollback — the device already has a newer config",
+        4: "wrong owner — this device belongs to a different pool",
+        5: "device storage failure",
+        6: "transfer corrupted (CRC)",
+        7: "the config requires a feature this device's firmware doesn't support",
+      };
+      throw new Error(reasons[code] ?? `device error code ${code}`);
     }
     return resp;
   }

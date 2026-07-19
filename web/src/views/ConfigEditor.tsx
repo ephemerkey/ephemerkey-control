@@ -8,6 +8,7 @@ import { useState } from "react";
 import {
   CalendarWindow,
   QUORUM_UNPACED_MAX,
+  configFeatures,
   defaultCalendar,
   defaultKey,
   defaultPolicy,
@@ -866,6 +867,13 @@ export default function ConfigEditor({
               <li key={i}>{describeSlot(s, cfg.zones ?? [], cfg.calendars ?? [])}</li>
             ))}
           </ol>
+          {configFeatures(cfg).length > 0 && (
+            <p className="hint" data-testid="cfg-crit">
+              Requires device support for: <strong>{configFeatures(cfg).join(", ")}</strong> — a
+              device on older firmware will refuse this config outright rather than silently skip
+              a protection.
+            </p>
+          )}
           {onPush ? (
             <button className="primary" data-testid="cfg-push" onClick={onPush}>
               Seal &amp; push to device

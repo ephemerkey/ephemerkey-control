@@ -38,7 +38,8 @@ export default function Push() {
       mark(0, "ok");
 
       mark(1, "run");
-      const enrollment = parseEnrollment(await serial.identify());
+      const identityDoc = await serial.identify();
+      const enrollment = parseEnrollment(identityDoc);
       const deviceIdHex = bytesToHex(enrollment.deviceId);
       mark(1, "ok", `device ${deviceIdHex}`);
 
@@ -49,7 +50,7 @@ export default function Push() {
       if (sigFrame.type !== FrameType.ChallengeSig) {
         throw new Error(`unexpected frame ${sigFrame.type}`);
       }
-      const info = await courierIdentify(deviceIdHex, nonce, sigFrame.payload);
+      const info = await courierIdentify(deviceIdHex, nonce, sigFrame.payload, identityDoc);
       if (!info.pending) {
         mark(2, "ok", `already current (acked seq ${info.acked_seq})`);
         setBusy(false);

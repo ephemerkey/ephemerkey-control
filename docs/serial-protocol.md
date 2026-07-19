@@ -47,7 +47,7 @@ End-to-end exercise: `node scripts/serial-emu-e2e.mjs`.
 | 0x41 | h→d | WIFI_STATUS_REQ | empty |
 | 0x42 | d→h | WIFI_STATUS   | CBOR `{1: connected uint(0/1), 2: ssid tstr, 3: rssi int?, 4: ip tstr?}` |
 | 0x7E | d→h | OK            | generic ack (begin/chunk accepted) |
-| 0x7F | d→h | ERROR         | `{code u8}`: 1 bad-state, 2 bad-sig, 3 seq-rollback, 4 wrong-set, 5 storage, 6 crc |
+| 0x7F | d→h | ERROR         | `{code u8}`: 1 bad-state, 2 bad-sig, 3 seq-rollback, 4 wrong-set, 5 storage, 6 crc, 7 unsupported-critical-feature |
 
 Enrollment write-back (`owner_pub` TOFU) happens via the same CONFIG path:
 **the inner COSE_Sign1 carries `owner_pub` as its `kid` (header 4)**. A

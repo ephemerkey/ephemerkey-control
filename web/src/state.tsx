@@ -9,6 +9,7 @@ import { CTX_REGISTER, getSourceBlob, putSourceBlob, signedGet, signedPost } fro
 import { deriveKx, sealToKx, unsealWithSeed } from "./lib/backup";
 import { forgetOwnerKey, loadOwnerKey, OwnerKey, saveOwnerKey, setIdFromPub } from "./lib/keys";
 import { seal, sign1 } from "./lib/cose";
+import { configFeatures } from "./lib/config";
 
 const SOURCE_TEMPLATE = JSON.stringify(
   { format: "ekctl-source-v1", devices: {}, notes: "" },
@@ -166,7 +167,11 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     const cfg = doc.devices?.[d.device_id];
     if (!cfg) throw new Error("no config for this device yet — open its policies first");
     const seq = Math.max(d.latest_seq ?? 0, d.acked_seq ?? 0) + 1;
-    const inner = sign1(utf8ToBytes(JSON.stringify(cfg)), key.pub, key.priv);
+    // Stamp the crit list: the device must understand every named feature
+    // or refuse the config (no silent downgrade on old firmware).
+    const crit = configFeatures(cfg);
+    const payload = crit.length ? { ...cfg, crit } : cfg;
+    const inner = sign1(utf8ToBytes(JSON.stringify(payload)), key.pub, key.priv);
     const sealed = seal(inner, hexToBytes(d.kx_pub), seq, hexToBytes(d.device_id));
     await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/configs`, {
       device_id: d.device_id,

@@ -149,3 +149,19 @@ export function defaultSlot(): SlotDef {
 export function defaultDeviceConfig(role: 1 | 2): DeviceConfig {
   return { role, keys: [defaultKey()], slots: [defaultSlot()] };
 }
+
+/** Feature tags a config's security depends on — becomes its `crit` list.
+ *  A device that doesn't recognize an entry must refuse the config
+ *  (frame error 7) rather than silently not enforce it. */
+export function configFeatures(cfg: DeviceConfig): string[] {
+  const f = new Set<string>();
+  for (const s of cfg.slots) {
+    if (s.policy.type === "sequence" && (s.policy.jitter_s ?? 0) > 0) f.add("seq-jitter");
+    if (s.policy.type === "quorum" && (s.policy.gap_max_s ?? QUORUM_UNPACED_MAX) < QUORUM_UNPACED_MAX) {
+      f.add("quorum-pace");
+    }
+    if (s.gates.fence !== undefined) f.add("zones");
+    if (s.gates.calendar !== undefined) f.add("calendars");
+  }
+  return [...f].sort();
+}

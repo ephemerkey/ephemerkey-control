@@ -99,7 +99,7 @@ try {
   // Enroll it under the set.
   r = await client.signedPost(ownerPriv, "ekctl-manager-v1", `/api/sets/${setId}/devices`, {
     device_id: devId, sign_pub: bytesToHex(devSignPub), kx_pub: bytesToHex(devKxPub),
-    role: 2, name: "emu lock", fw: fields[4],
+    role: 2, name: "emu lock", fw: "stale-0.0",
   });
   check("enroll device", r.status === 200, JSON.stringify(r.body));
 
@@ -109,10 +109,17 @@ try {
   check("challenge_sig frame", sigFrame.type === FT.CHALLENGE_SIG && sigFrame.payload.length === 64);
   let cr = await fetch(`${SERVER}/api/courier/identify`, {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ device_id: devId, nonce: bytesToHex(nonce), challenge_sig: bytesToHex(sigFrame.payload) }),
+    body: JSON.stringify({
+      device_id: devId, nonce: bytesToHex(nonce), challenge_sig: bytesToHex(sigFrame.payload),
+      enrollment_b64: Buffer.from(idFrame.payload).toString("base64"),
+    }),
   });
   let cb = await cr.json();
   check("identify via device sig", cr.status === 200 && cb.pending === false, JSON.stringify(cb));
+
+  // The self-signed identity doc refreshed the roster's fw (attested).
+  let rr = await client.signedGet(ownerPriv, `/api/sets/${setId}`);
+  check("attested fw refresh", rr.body.devices[0].fw === fields[4], `fw=${rr.body.devices[0].fw}`);
 
   // Manager seals a config (kid = owner_pub for TOFU) and uploads it.
   const cfgJson = utf8ToBytes(JSON.stringify({ role: 2, keys: [], slots: [] }));
@@ -165,6 +172,21 @@ try {
   const evilSealed = seal(sign1(cfgJson, ed25519.getPublicKey(evilPriv), evilPriv), devKxPub, 2, fields[1]);
   const evil = await pushBlob(evilSealed, 2);
   check("wrong owner rejected (wrong-set)", evil.type === FT.ERROR && evil.payload[0] === 4, `code=${evil.payload?.[0]}`);
+
+  // Critical features: unknown crit -> refused (error 7), known -> accepted.
+  const critBad = seal(
+    sign1(utf8ToBytes(JSON.stringify({ role: 2, keys: [], slots: [], crit: ["time-travel"] })), ownerPub, ownerPriv),
+    devKxPub, 2, fields[1],
+  );
+  const badResp = await pushBlob(critBad, 2);
+  check("unknown critical feature refused", badResp.type === FT.ERROR && badResp.payload[0] === 7, `code=${badResp.payload?.[0]}`);
+
+  const critGood = seal(
+    sign1(utf8ToBytes(JSON.stringify({ role: 2, keys: [], slots: [], crit: ["seq-jitter", "quorum-pace"] })), ownerPub, ownerPriv),
+    devKxPub, 2, fields[1],
+  );
+  const goodResp = await pushBlob(critGood, 2);
+  check("known critical features accepted", goodResp.type === FT.CONFIG_ACK, `type=0x${goodResp.type.toString(16)}`);
 
   // Pull the device's signed event log and relay it to the server.
   const evFrame = await chan.request(FT.EVENTS_REQ, Uint8Array.of(0, 0, 0, 0));

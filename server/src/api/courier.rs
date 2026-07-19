@@ -20,6 +20,10 @@ pub struct IdentifyReq {
     /// CHALLENGE_SIG frame, hex. Prevents couriers probing pending-update
     /// state for device ids they aren't physically holding.
     pub challenge_sig: String,
+    /// Optional: the device's self-signed IDENTITY doc (base64). If it
+    /// verifies under the ENROLLED sign_pub, the reported fw string
+    /// refreshes the roster — attested, not courier-claimed.
+    pub enrollment_b64: Option<String>,
 }
 
 /// POST /api/courier/identify → { pending, seq }
@@ -60,6 +64,29 @@ pub async fn identify(
     use ed25519_dalek::Verifier;
     key.verify(&msg, &sig)
         .map_err(|_| ApiError::Unauthorized("device challenge verification failed".into()))?;
+
+    // Attested fw refresh: only an IDENTITY doc signed by the enrolled
+    // device key updates the roster's fw field.
+    if let Some(b64) = &req.enrollment_b64 {
+        use base64::Engine as _;
+        let doc = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .map_err(|_| ApiError::BadRequest("enrollment_b64: invalid base64".into()))?;
+        let mut scratch = vec![0u8; doc.len() + 64];
+        let (payload, _) = ephemerkey_envelope::sign1_verify(&doc, &mut scratch, &key)
+            .map_err(|_| ApiError::Unauthorized("enrollment doc signature invalid".into()))?;
+        let enr = ephemerkey_envelope::schema::enrollment_decode(payload)
+            .map_err(|_| ApiError::BadRequest("malformed enrollment doc".into()))?;
+        if enr.device_id != device_id.as_slice() {
+            return Err(ApiError::BadRequest("enrollment doc is for a different device".into()));
+        }
+        sqlx::query("UPDATE devices SET fw = ?, last_seen_at = ? WHERE device_id = ?")
+            .bind(enr.fw)
+            .bind(crate::db::now())
+            .bind(&device_id)
+            .execute(&st.db)
+            .await?;
+    }
 
     let pending_seq: Option<i64> = row.get("pending_seq");
     Ok(Json(serde_json::json!({

@@ -139,6 +139,7 @@ export async function courierIdentify(
   deviceIdHex: string,
   nonce: Uint8Array,
   challengeSig: Uint8Array,
+  enrollmentDoc?: Uint8Array,
 ): Promise<any> {
   const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
   const res = await fetch("/api/courier/identify", {
@@ -148,6 +149,8 @@ export async function courierIdentify(
       device_id: deviceIdHex,
       nonce: toHex(nonce),
       challenge_sig: toHex(challengeSig),
+      // attested fw refresh: the device-signed identity doc, if we have it
+      enrollment_b64: enrollmentDoc ? btoa(String.fromCharCode(...enrollmentDoc)) : undefined,
     }),
   });
   return parseOrThrow(res);

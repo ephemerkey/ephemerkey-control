@@ -200,6 +200,38 @@ The ESP32 also natively speaks Improv-WiFi over its own USB; we keep that
 as a recovery/bring-up fallback but the primary path is the STM32-mediated
 frame above, so one cable and one protocol cover everything.
 
+## Forward compatibility & critical features
+
+Every layer tolerates unknown additions (CBOR header labels, JSON fields,
+event types are skipped, not fatal), so schema growth is additive. The
+sharp edge of that tolerance is **silent semantic downgrade**: an old
+device ignoring a security field it doesn't know (randomized pacing, a
+paced quorum) would accept the config and quietly not enforce the
+protection. The `crit` convention closes it, X.509-critical style:
+
+- A config lists the feature tags its security depends on (`crit:
+  ["seq-jitter", "quorum-pace", ...]`). The console stamps this
+  automatically at seal time from what the config actually uses.
+- A consumer (emulator today, firmware via `Store::validate_config`)
+  MUST reject a config naming a crit feature it doesn't implement —
+  serial `ERROR 7 unsupported-critical-feature`, surfaced in the UI as
+  "requires a feature this device's firmware doesn't support".
+- The review step lists the requirements before you push. Devices on
+  older firmware refuse outright; nothing ever silently weakens.
+
+**Attested fw tracking**: the roster's `fw` field refreshes whenever a
+device proves itself — courier identify may carry the device-signed
+IDENTITY doc; the server verifies it under the *enrolled* sign key
+before updating (a courier can't spoof a version). The ESP32 path will
+do the same once its client lands.
+
+**Firmware upgrades (roadmap, not built)**: same discipline as configs —
+images signed by the owner key and sealed to the device, staged via the
+ESP32-C3's flash per the upstream OTA design, applied by a
+WRP-protected bootloader that verifies before flashing. The envelope
+crate already covers sign/seal; the missing pieces are a chunked
+large-payload profile (images ≫ 4 KiB) and the bootloader handshake.
+
 ## Owner-key custody & backup
 
 Everything derives from one 32-byte Ed25519 seed (sign key, `set_id`, the
