@@ -7,6 +7,7 @@ import DeviceDetail from "./views/DeviceDetail";
 import Devices from "./views/Devices";
 import Landing from "./views/Landing";
 import Push from "./views/Push";
+import RecoveryCard from "./views/RecoveryCard";
 import Unlock from "./views/Unlock";
 import Welcome from "./views/Welcome";
 
@@ -41,6 +42,7 @@ function ManagerArea() {
   const pool = usePool();
   if (pool.locked) return <Unlock />;
   if (!pool.key) return <Welcome />;
+  if (pool.justCreated) return <RecoveryCard />;
   return (
     <div className="layout">
       <aside>

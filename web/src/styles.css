@@ -465,3 +465,20 @@ a {
 .pool-switcher { margin: 0.2rem 0; max-width: 100%; font-size: 0.8rem; }
 
 .lockbtn { text-align: left; font-size: 0.82rem; }
+
+.recovery-id {
+  font-family: ui-monospace, monospace;
+  font-size: 1.5rem;
+  letter-spacing: 0.08em;
+  padding: 0.6rem 0.9rem;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  display: inline-block;
+  user-select: all;
+}
+@media print {
+  body * { visibility: hidden; }
+  .print-card, .print-card * { visibility: visible; }
+  .print-card { position: absolute; inset: 0; border: none; }
+  .print-hide { display: none !important; }
+}

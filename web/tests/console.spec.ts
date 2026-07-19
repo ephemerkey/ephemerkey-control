@@ -31,8 +31,22 @@ const POOLPASS = "poolpass123";
 async function newPool(page: any, pass = POOLPASS) {
   await page.getByTestId("create-pass").fill(pass);
   await page.getByTestId("owner-generate").click();
+  // The "save your recovery id" screen appears once — acknowledge it.
+  await expect(page.getByTestId("recovery-setid")).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId("recovery-continue").click();
   await expect(page.getByTestId("set-id")).toBeVisible({ timeout: 30_000 });
 }
+
+test("creating a pool prompts to save the recovery id", async ({ page }) => {
+  await page.goto("/devices");
+  await page.getByTestId("create-pass").fill(POOLPASS);
+  await page.getByTestId("owner-generate").click();
+  const shown = (await page.getByTestId("recovery-setid").innerText()).trim();
+  expect(shown).toMatch(/^[0-9a-f]{16}$/);
+  await expect(page.getByTestId("recovery-card")).toContainText("recovery id");
+  await page.getByTestId("recovery-continue").click();
+  await expect(page.getByTestId("set-id")).toHaveText(shown);
+});
 
 test("create pool: everything loads itself", async ({ page }) => {
   await page.goto("/devices");

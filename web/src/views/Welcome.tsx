@@ -34,7 +34,7 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
     try {
       await pool.createPool(createPass);
       setCreatePass("");
-      done(); // navigate only when adding from the manage screen
+      // The recovery-id screen (ManagerArea) takes over; its Continue navigates.
     } catch (e) {
       setNote({
         id: "key",

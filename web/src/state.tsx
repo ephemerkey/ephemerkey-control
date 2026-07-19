@@ -62,6 +62,10 @@ interface Pool {
   /** Create a new pool: register it, back the key up to the server under a
    *  passphrase (default), and encrypt browser storage under the same one. */
   createPool: (passphrase: string, name?: string) => Promise<void>;
+  /** set_id of a pool just created — triggers the "save your recovery id"
+   *  screen until dismissed. */
+  justCreated: string | null;
+  dismissCreated: () => void;
   forget: () => void;
   roster: any;
   rosterError: string | null;
@@ -91,6 +95,7 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     initial.kind === "locked" ? initial.setId : null,
   );
   const [pools, setPools] = useState<PoolSummary[]>(() => listPools());
+  const [justCreated, setJustCreated] = useState<string | null>(null);
   const [roster, setRoster] = useState<any>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [source, setSourceState] = useState(SOURCE_TEMPLATE);
@@ -290,6 +295,7 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     // key is recoverable — a pool must not exist only as browser state.
     await ensureRegistered(k);
     await putKeywrapBlob(k, id, wrapped);
+    setJustCreated(id); // prompt the manager to save the recovery id
   }
 
   /** Remove the active pool from this browser and switch to another (or none). */
@@ -367,6 +373,8 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     renameActive,
     adopt,
     createPool,
+    justCreated,
+    dismissCreated: () => setJustCreated(null),
     forget,
     roster,
     rosterError,
