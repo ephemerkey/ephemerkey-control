@@ -247,6 +247,7 @@ test("lock selects generator minter keys; generator defines them", async ({ page
   await page.getByTestId("key-1-once").selectOption("refuse");
 
   // --- Lock L: SELECTS G's keys, owns its confirm, builds rituals ---
+  await page.getByTestId("nav-devices").click();
   await page.getByTestId("nav-add").click();
   dl = page.waitForEvent("download");
   await page.getByTestId("dev-mock").click(); // role defaults to lock
@@ -333,6 +334,7 @@ test("non-ephemerkey generator: authenticator with a linked QR key", async ({ pa
     .toBeGreaterThan(0);
 
   // Create a plain authenticator (no hardware, no enrollment).
+  await page.getByTestId("nav-devices").click();
   await page.getByTestId("nav-add").click();
   await page.getByTestId("auth-new-name").fill("Alice phone");
   await page.getByTestId("auth-create").click();
@@ -373,6 +375,7 @@ test("config linter flags two rituals sharing a key (unreachable ritual)", async
   await page.getByTestId("step-keys").click();
   await page.getByTestId("cfg-add-key").click(); // generator now has 2 keys
 
+  await page.getByTestId("nav-devices").click();
   await page.getByTestId("nav-add").click();
   dl = page.waitForEvent("download");
   await page.getByTestId("dev-mock").click(); // lock

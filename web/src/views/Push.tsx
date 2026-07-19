@@ -92,7 +92,7 @@ export default function Push() {
   if (!webSerialSupported()) {
     return (
       <section>
-        <h2>Push update</h2>
+        <h2>Local programming</h2>
         <p>This browser has no WebSerial support — use a Chromium-based browser.</p>
       </section>
     );
@@ -101,7 +101,7 @@ export default function Push() {
   return (
     <section>
       <p className="crumbs"><a href="/">← landing</a></p>
-      <h2>Push update</h2>
+      <h2>Local programming</h2>
       <p>
         Plug in an ephemerkey and hold its provisioning button while connecting. You&apos;ll ferry an
         encrypted update you can&apos;t read; the device itself verifies it came from its owner.

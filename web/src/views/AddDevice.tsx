@@ -3,7 +3,7 @@
 // fallback. Success lands you on the device's detail page.
 
 import { lazy, Suspense, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ed25519, x25519 } from "@noble/curves/ed25519";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import { signedPost } from "../lib/api";
@@ -148,6 +148,7 @@ export default function AddDevice() {
 
   return (
     <section>
+      <p className="crumbs"><Link to="/devices">← devices</Link></p>
       <h2>Add device</h2>
       <p className="stephint">
         A device introduces itself with a self-signed <em>enrollment doc</em> (its id and public

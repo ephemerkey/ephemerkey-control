@@ -61,9 +61,6 @@ function ManagerArea() {
         <NavLink to="/devices" data-testid="nav-devices">
           Devices
         </NavLink>
-        <NavLink to="/devices/add" data-testid="nav-add">
-          Add device
-        </NavLink>
         <NavLink to="/events" data-testid="nav-events">
           Events
         </NavLink>
@@ -71,7 +68,7 @@ function ManagerArea() {
           Backup &amp; keys
         </NavLink>
         <NavLink to="/push" data-testid="nav-push">
-          Courier page
+          Local programming
         </NavLink>
         {pool.activeEncrypted && (
           <button data-testid="lock-now-nav" className="lockbtn" onClick={() => pool.lockNow()}>

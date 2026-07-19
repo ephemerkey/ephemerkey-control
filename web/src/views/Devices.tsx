@@ -71,6 +71,9 @@ export default function Devices() {
     <section>
       <div className="row">
         <h2 data-testid="roster-count">Devices — {devices.length} device(s)</h2>
+        <Link className="btnlink primary" data-testid="nav-add" to="/devices/add">
+          + Add device
+        </Link>
         {devices.length > 0 && (
           <button className="primary" data-testid="publish-btn" onClick={publish}>
             Publish all

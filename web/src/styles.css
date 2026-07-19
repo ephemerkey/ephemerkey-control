@@ -491,3 +491,15 @@ a {
 .qrscanner { margin: 0.4rem 0; }
 input.invalid { border-color: var(--err); }
 .fieldhelp.err { color: var(--err); opacity: 0.9; }
+
+.btnlink {
+  display: inline-block;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  text-decoration: none;
+  color: inherit;
+}
+.btnlink.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btnlink.primary:hover { filter: brightness(1.1); }

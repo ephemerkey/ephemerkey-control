@@ -28,7 +28,7 @@ export default function Landing() {
       </Link>
 
       <Link to="/push" className="landing-card" data-testid="landing-program">
-        <h3>📲 Program a device</h3>
+        <h3>📲 Local programming</h3>
         <p>
           Hold an ephemerkey in provisioning mode and deliver its pending update over WebSerial. No
           account, no key — you ferry a sealed blob you can&apos;t read; the device verifies it.
