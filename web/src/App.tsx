@@ -5,6 +5,7 @@ import Backup from "./views/Backup";
 import Authenticator from "./views/Authenticator";
 import DeviceDetail from "./views/DeviceDetail";
 import Devices from "./views/Devices";
+import Events from "./views/Events";
 import Landing from "./views/Landing";
 import Push from "./views/Push";
 import RecoveryCard from "./views/RecoveryCard";
@@ -63,6 +64,9 @@ function ManagerArea() {
         <NavLink to="/devices/add" data-testid="nav-add">
           Add device
         </NavLink>
+        <NavLink to="/events" data-testid="nav-events">
+          Events
+        </NavLink>
         <NavLink to="/backup" data-testid="nav-backup">
           Backup &amp; keys
         </NavLink>
@@ -85,6 +89,7 @@ function ManagerArea() {
           <Route path="/devices/add" element={<AddDevice />} />
           <Route path="/device/:id" element={<DeviceDetail />} />
           <Route path="/authenticator/:id" element={<Authenticator />} />
+          <Route path="/events" element={<Events />} />
           <Route path="/backup" element={<Backup />} />
           <Route path="/pools" element={<Welcome manage />} />
           <Route path="*" element={<Navigate to="/devices" replace />} />

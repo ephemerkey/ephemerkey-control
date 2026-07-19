@@ -54,6 +54,7 @@ interface Pool {
   switchPool: (setId: string) => void;
   activeEncrypted: boolean;
   setBrowserPassphrase: (passphrase: string) => void;
+  changePassphrase: (oldPass: string, newPass: string) => Promise<void>;
   clearBrowserPassphrase: () => void;
   /** Drop the in-memory key now and require the passphrase again. */
   lockNow: () => void;
@@ -148,6 +149,29 @@ export function PoolProvider({ children }: { children: ReactNode }) {
   function setBrowserPassphrase(passphrase: string) {
     if (!key) return;
     const wrapped = wrapKeyfile(exportKeyFile(key), passphrase);
+    addPoolEncrypted(key, wrapped);
+    refreshPools();
+  }
+
+  /** Change the passphrase protecting this pool — re-wraps both the at-rest
+   *  browser key and the server keywrap backup. Requires the current
+   *  passphrase (verified against the stored blob) when one is set. */
+  async function changePassphrase(oldPass: string, newPass: string) {
+    if (!key || !setId) throw new Error("no active pool");
+    if (newPass.length < 8) throw new Error("new passphrase must be at least 8 characters");
+    const current = wrappedFor(setId);
+    if (current) {
+      try {
+        unwrapKeyfile(current, oldPass); // proves the caller knows the old one
+      } catch {
+        throw new Error("current passphrase is wrong");
+      }
+    }
+    const wrapped = wrapKeyfile(exportKeyFile(key), newPass);
+    // Server first: if it fails, nothing local changes and the old
+    // passphrase stays valid everywhere (no split state).
+    await ensureRegistered(key);
+    await putKeywrapBlob(key, setId, wrapped);
     addPoolEncrypted(key, wrapped);
     refreshPools();
   }
@@ -398,6 +422,7 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     switchPool,
     activeEncrypted: setId ? isEncrypted(setId) : false,
     setBrowserPassphrase,
+    changePassphrase,
     clearBrowserPassphrase,
     lockNow,
     renameActive,

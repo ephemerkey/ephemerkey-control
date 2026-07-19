@@ -197,6 +197,15 @@ try {
   cb = await cr.json();
   check("server ingests emu events", cr.status === 200 && cb.inserted >= 1, JSON.stringify(cb));
 
+  // Manager view: the captured events are listed for the set (config-ack
+  // from the earlier apply is among them).
+  rr = await client.signedGet(ownerPriv, `/api/sets/${setId}/events`);
+  check(
+    "manager lists captured events",
+    rr.status === 200 && rr.body.events.length >= 1 && rr.body.events.some((e) => e.type === 8),
+    JSON.stringify(rr.body.events?.map((e) => e.type)),
+  );
+
   // WiFi provisioning frames.
   let wf = await chan.request(FT.WIFI_SET, cMap(cUint(1), cTstr("e2e-net"), cUint(2), cTstr("hunter22")));
   check("wifi set", wf.type === FT.OK);

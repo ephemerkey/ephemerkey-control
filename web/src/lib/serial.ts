@@ -198,6 +198,16 @@ export class EkSerial {
     return f.payload;
   }
 
+  /** Pull the device's signed event batch (COSE_Sign1 over the CBOR array).
+   *  `after` = highest event seq already stored (0 = all). */
+  async requestEvents(after = 0): Promise<Uint8Array> {
+    const payload = new Uint8Array(4);
+    new DataView(payload.buffer).setUint32(0, after, true);
+    const f = await this.request(FrameType.EventsReq, payload, 5000);
+    if (f.type !== FrameType.Events) throw new Error(`unexpected frame ${f.type}`);
+    return f.payload;
+  }
+
   /** Stream a sealed config blob; resolves with the device's signed ack. */
   async pushConfig(seq: number, blob: Uint8Array): Promise<Uint8Array> {
     const begin = new Uint8Array(10);

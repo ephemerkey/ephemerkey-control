@@ -106,6 +106,8 @@ test("blind courier pushes a pending update through the real page", async ({ pag
     await expect(steps.nth(4)).toContainText(`device now at seq ${seqPushed} (ack verified by server)`, {
       timeout: 15_000,
     });
+    // The courier also pulls the device's signed events and relays them.
+    await expect(steps.nth(5)).toContainText("event(s) captured", { timeout: 15_000 });
   } finally {
     disconnect();
   }

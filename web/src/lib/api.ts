@@ -173,6 +173,23 @@ export async function courierAck(
   return parseOrThrow(res);
 }
 
+/** Relay a device-signed event batch (COSE_Sign1) to the server, which
+ *  verifies the signature against the enrolled key before storing. Same
+ *  endpoint the ESP32 WiFi path uses — the courier just forwards bytes. */
+export async function courierPostEvents(deviceIdHex: string, batch: Uint8Array): Promise<any> {
+  const res = await fetch(`/api/device/${deviceIdHex}/events`, {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: batch as unknown as BodyInit,
+  });
+  return parseOrThrow(res);
+}
+
+/** Manager view of verified events for the set. */
+export function listEvents(key: OwnerKey, setId: string): Promise<any> {
+  return signedGet(key, `/api/sets/${setId}/events`);
+}
+
 export async function courierFetchConfig(
   deviceIdHex: string,
 ): Promise<{ seq: number; blob: Uint8Array }> {

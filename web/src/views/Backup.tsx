@@ -13,6 +13,10 @@ export default function Backup() {
   const pool = usePool();
   const [backupPass, setBackupPass] = useState("");
   const [lockPass, setLockPass] = useState("");
+  const [oldPass, setOldPass] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [newPass2, setNewPass2] = useState("");
+  const [changing, setChanging] = useState(false);
   const [noteBackup, setNoteBackup] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [noteSource, setNoteSource] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const key = pool.key!;
@@ -104,22 +108,70 @@ export default function Backup() {
           without it the key sits in local storage in the clear.
         </p>
         {pool.activeEncrypted ? (
-          <div className="row">
-            <span className="inline-status ok">this pool is passphrase-protected in this browser</span>
-            <button data-testid="lock-now" onClick={() => pool.lockNow()}>
-              🔒 Lock now
-            </button>
-            <button
-              data-testid="lock-clear"
-              className="danger"
-              onClick={() => {
-                pool.clearBrowserPassphrase();
-                setNoteBackup({ kind: "ok", text: "browser passphrase removed" });
-              }}
-            >
-              Remove passphrase
-            </button>
-          </div>
+          <>
+            <div className="row">
+              <span className="inline-status ok">this pool is passphrase-protected in this browser</span>
+              <button data-testid="lock-now" onClick={() => pool.lockNow()}>
+                🔒 Lock now
+              </button>
+              <button
+                data-testid="lock-clear"
+                className="danger"
+                onClick={() => {
+                  pool.clearBrowserPassphrase();
+                  setNoteBackup({ kind: "ok", text: "browser passphrase removed" });
+                }}
+              >
+                Remove passphrase
+              </button>
+            </div>
+            <div className="row">
+              <input
+                data-testid="change-old"
+                type="password"
+                placeholder="current passphrase"
+                value={oldPass}
+                onChange={(e) => setOldPass(e.target.value)}
+              />
+              <input
+                data-testid="change-new"
+                type="password"
+                placeholder="new passphrase (min 8)"
+                value={newPass}
+                onChange={(e) => setNewPass(e.target.value)}
+              />
+              <input
+                data-testid="change-confirm"
+                type="password"
+                placeholder="confirm new"
+                value={newPass2}
+                onChange={(e) => setNewPass2(e.target.value)}
+              />
+              <button
+                data-testid="change-btn"
+                disabled={changing}
+                onClick={() => {
+                  if (newPass !== newPass2) {
+                    setNoteBackup({ kind: "err", text: "new passphrases don't match" });
+                    return;
+                  }
+                  setChanging(true);
+                  pool
+                    .changePassphrase(oldPass, newPass)
+                    .then(() => {
+                      setOldPass("");
+                      setNewPass("");
+                      setNewPass2("");
+                      setNoteBackup({ kind: "ok", text: "passphrase changed (browser + server backup)" });
+                    })
+                    .catch((e) => setNoteBackup({ kind: "err", text: `change failed: ${e}` }))
+                    .finally(() => setChanging(false));
+                }}
+              >
+                {changing ? "changing…" : "Change passphrase"}
+              </button>
+            </div>
+          </>
         ) : (
           <div className="row">
             <input

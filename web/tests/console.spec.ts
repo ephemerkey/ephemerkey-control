@@ -516,6 +516,15 @@ test("manual enroll validates hex fields to catch typos", async ({ page }) => {
   await expect(page.getByTestId("dev-add-manual")).toBeDisabled();
 });
 
+test("events view loads and shows the empty state for a new pool", async ({ page }) => {
+  await page.goto("/devices");
+  await newPool(page);
+  await page.getByTestId("nav-events").click();
+  await expect(page.getByTestId("events-empty")).toBeVisible();
+  await page.getByTestId("events-refresh").click();
+  await expect(page.getByTestId("events-empty")).toBeVisible();
+});
+
 test("landing chooses between manage and program flows", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("landing-manage")).toBeVisible();
@@ -574,6 +583,48 @@ test("forget a pool removes it from this browser only", async ({ page }) => {
   await page.getByTestId("restore-pass").fill(POOLPASS);
   await page.getByTestId("restore-btn").click();
   await expect(page.getByTestId("set-id")).toHaveText(drop, { timeout: 30_000 });
+});
+
+test("change passphrase re-wraps browser and server; old fails, new works", async ({ page }) => {
+  await page.goto("/devices");
+  await newPool(page);
+  const id = (await page.getByTestId("set-id").innerText()).trim();
+
+  await page.getByTestId("nav-backup").click();
+  // Wrong current passphrase is rejected.
+  await page.getByTestId("change-old").fill("wrongcurrent");
+  await page.getByTestId("change-new").fill("brandnewpass1");
+  await page.getByTestId("change-confirm").fill("brandnewpass1");
+  await page.getByTestId("change-btn").click();
+  await expect(page.getByTestId("status-backup")).toContainText("current passphrase is wrong", {
+    timeout: 30_000,
+  });
+  // Correct change.
+  await page.getByTestId("change-old").fill(POOLPASS);
+  await page.getByTestId("change-new").fill("brandnewpass1");
+  await page.getByTestId("change-confirm").fill("brandnewpass1");
+  await page.getByTestId("change-btn").click();
+  await expect(page.getByTestId("status-backup")).toContainText("passphrase changed", { timeout: 30_000 });
+
+  // Reload: the OLD passphrase no longer unlocks; the new one does.
+  await page.reload();
+  await page.getByTestId("unlock-pass").fill(POOLPASS);
+  await page.getByTestId("unlock-btn").click();
+  await expect(page.getByTestId("unlock-err")).toContainText("wrong passphrase", { timeout: 30_000 });
+  await page.getByTestId("unlock-pass").fill("brandnewpass1");
+  await page.getByTestId("unlock-btn").click();
+  await expect(page.getByTestId("set-id")).toHaveText(id, { timeout: 30_000 });
+
+  // And the SERVER keywrap moved too: a fresh browser restores with the new
+  // passphrase, not the old.
+  const ctx = await page.context().browser()!.newContext();
+  const p2 = await ctx.newPage();
+  await p2.goto("/devices");
+  await p2.getByTestId("restore-setid").fill(id);
+  await p2.getByTestId("restore-pass").fill("brandnewpass1");
+  await p2.getByTestId("restore-btn").click();
+  await expect(p2.getByTestId("set-id")).toHaveText(id, { timeout: 30_000 });
+  await ctx.close();
 });
 
 test("forgetting the active pool shows the pool list, not a surprise unlock", async ({ page }) => {

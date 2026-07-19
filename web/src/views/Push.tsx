@@ -4,7 +4,13 @@
 
 import { useState } from "react";
 import { bytesToHex } from "@noble/hashes/utils";
-import { courierAck, courierChallenge, courierFetchConfig, courierIdentify } from "../lib/api";
+import {
+  courierAck,
+  courierChallenge,
+  courierFetchConfig,
+  courierIdentify,
+  courierPostEvents,
+} from "../lib/api";
 import { parseEnrollment } from "../lib/cose";
 import { EkSerial, FrameType, webSerialSupported } from "../lib/serial";
 
@@ -16,6 +22,7 @@ const INITIAL: Step[] = [
   { label: "Check for pending update", state: "todo" },
   { label: "Fetch sealed config", state: "todo" },
   { label: "Push to device & verify ack", state: "todo" },
+  { label: "Sync events to server", state: "todo" },
 ];
 
 export default function Push() {
@@ -51,21 +58,28 @@ export default function Push() {
         throw new Error(`unexpected frame ${sigFrame.type}`);
       }
       const info = await courierIdentify(deviceIdHex, nonce, sigFrame.payload, identityDoc);
-      if (!info.pending) {
+
+      if (info.pending) {
+        mark(2, "ok", `seq ${info.seq} pending`);
+        mark(3, "run");
+        const { seq, blob } = await courierFetchConfig(deviceIdHex);
+        mark(3, "ok", `${blob.length} sealed bytes`);
+        mark(4, "run");
+        const ack = await serial.pushConfig(seq, blob);
+        await courierAck(deviceIdHex, seq, ack);
+        mark(4, "ok", `device now at seq ${seq} (ack verified by server)`);
+      } else {
         mark(2, "ok", `already current (acked seq ${info.acked_seq})`);
-        setBusy(false);
-        return;
+        mark(3, "ok", "nothing to fetch");
+        mark(4, "ok", "nothing to push");
       }
-      mark(2, "ok", `seq ${info.seq} pending`);
 
-      mark(3, "run");
-      const { seq, blob } = await courierFetchConfig(deviceIdHex);
-      mark(3, "ok", `${blob.length} sealed bytes`);
-
-      mark(4, "run");
-      const ack = await serial.pushConfig(seq, blob);
-      await courierAck(deviceIdHex, seq, ack);
-      mark(4, "ok", `device now at seq ${seq} (ack verified by server)`);
+      // Always pull the device's signed event log and relay it — this is how
+      // lock/unlock/tamper events reach the pool when a courier syncs online.
+      mark(5, "run");
+      const batch = await serial.requestEvents(0);
+      const res = await courierPostEvents(deviceIdHex, batch);
+      mark(5, "ok", `${res.inserted ?? 0} new event(s) captured`);
     } catch (e) {
       const i = steps.findIndex((s) => s.state === "run");
       mark(i >= 0 ? i : 0, "fail", String(e));
