@@ -55,10 +55,40 @@ export interface SlotDef {
   gates: SlotGates;
 }
 
+/** A geofence. Gates reference zones by index; `name` is for humans.
+ *  (Circle-only for now; upstream design also allows polygons.) */
+export interface Zone {
+  name: string;
+  lat: number;
+  lon: number;
+  radius_m: number;
+}
+
+/** A recurring time window. Gates reference windows by index. */
+export interface CalendarWindow {
+  name: string;
+  days: number[]; // 0 = Sunday … 6 = Saturday
+  start: string; // "HH:MM"
+  end: string; // "HH:MM"
+}
+
 export interface DeviceConfig {
   role: 1 | 2; // 1 generator, 2 lock-controller
   keys: KeyDef[];
   slots: SlotDef[];
+  // Referenced by slot gates; unknown to the emulator's serde (ignored
+  // there — its virtual env drives gate state) and carried to firmware
+  // once the zone/calendar tables land in the pinned config doc.
+  zones?: Zone[];
+  calendars?: CalendarWindow[];
+}
+
+export function defaultZone(n: number): Zone {
+  return { name: `zone ${n}`, lat: 0, lon: 0, radius_m: 100 };
+}
+
+export function defaultCalendar(n: number): CalendarWindow {
+  return { name: `window ${n}`, days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" };
 }
 
 export const DEFAULT_DISPLAY: KeyDisplay = {

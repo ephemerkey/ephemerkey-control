@@ -6,15 +6,21 @@
 
 import { useState } from "react";
 import {
+  CalendarWindow,
+  defaultCalendar,
   defaultKey,
   defaultPolicy,
   defaultSlot,
+  defaultZone,
   DeviceConfig,
   DEFAULT_DISPLAY,
   KeyDef,
   Policy,
   SlotDef,
+  Zone,
 } from "../lib/config";
+
+const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 const POLICY_CARDS: { type: Policy["type"]; title: string; tagline: string; use: string }[] = [
   {
@@ -314,11 +320,15 @@ function SlotEditor({
   s,
   idx,
   keyCount,
+  zones,
+  calendars,
   onChange,
 }: {
   s: SlotDef;
   idx: number;
   keyCount: number;
+  zones: Zone[];
+  calendars: CalendarWindow[];
   onChange: (s: SlotDef) => void;
 }) {
   const negKind = s.negative.startsWith("lockout:") ? "lockout" : s.negative;
@@ -397,28 +407,47 @@ function SlotEditor({
           <span className="fieldhelp">any invalid code wipes partial sequence progress</span>
         </label>
         <label className="field">
-          fence gate
-          <input
+          zone gate
+          <select
             data-testid={`slot-${idx}-fence`}
-            type="number"
-            min={0}
-            placeholder="none"
             value={s.gates.fence ?? ""}
+            disabled={zones.length === 0}
             onChange={(e) => onChange({ ...s, gates: { ...s.gates, fence: e.target.value === "" ? undefined : Number(e.target.value) } })}
-          />
-          <span className="fieldhelp">the lock itself must sit inside this geofence (portable locks)</span>
+          >
+            <option value="">none</option>
+            {zones.map((z, i) => (
+              <option key={i} value={i}>
+                {z.name}
+              </option>
+            ))}
+          </select>
+          <span className="fieldhelp">
+            {zones.length === 0
+              ? "no zones defined — add one in the Zones & times step"
+              : "the lock itself must sit inside this zone (portable locks carry their own GNSS)"}
+          </span>
         </label>
         <Num label="stillness_s" value={s.gates.stillness_s} help="the lock must have been motionless this long" onChange={(v) => onChange({ ...s, gates: { ...s.gates, stillness_s: v } })} />
         <label className="field">
-          calendar gate
-          <input
-            type="number"
-            min={0}
-            placeholder="none"
+          time gate
+          <select
+            data-testid={`slot-${idx}-calendar`}
             value={s.gates.calendar ?? ""}
+            disabled={calendars.length === 0}
             onChange={(e) => onChange({ ...s, gates: { ...s.gates, calendar: e.target.value === "" ? undefined : Number(e.target.value) } })}
-          />
-          <span className="fieldhelp">only during this configured time window</span>
+          >
+            <option value="">none</option>
+            {calendars.map((c, i) => (
+              <option key={i} value={i}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <span className="fieldhelp">
+            {calendars.length === 0
+              ? "no time windows defined — add one in the Zones & times step"
+              : "this ritual only works during the selected window"}
+          </span>
         </label>
       </details>
     </div>
@@ -442,21 +471,120 @@ function describePolicy(p: Policy): string {
   }
 }
 
-function describeSlot(s: SlotDef): string {
+function describeSlot(s: SlotDef, zones: Zone[], calendars: CalendarWindow[]): string {
   const action = s.action === "duress" ? "DURESS-UNLOCK (silent alarm)" : s.action.toUpperCase();
   const parts = [`listening to key ${s.key}: ${describePolicy(s.policy)} → ${action}`];
   const neg =
     s.negative === "reset" ? "wrong code resets progress" : s.negative === "silent" ? "wrong codes are silently ignored" : `wrong code locks out for ${s.negative.split(":")[1]}s`;
   parts.push(neg);
-  if (s.gates.fence !== undefined) parts.push(`only inside fence #${s.gates.fence}`);
+  if (s.gates.fence !== undefined) {
+    parts.push(`only inside zone '${zones[s.gates.fence]?.name ?? `#${s.gates.fence}`}'`);
+  }
   if (s.gates.stillness_s > 0) parts.push(`after ${s.gates.stillness_s}s of stillness`);
-  if (s.gates.calendar !== undefined) parts.push(`only during calendar window #${s.gates.calendar}`);
+  if (s.gates.calendar !== undefined) {
+    const w = calendars[s.gates.calendar];
+    parts.push(
+      w
+        ? `only during '${w.name}' (${w.days.map((d) => DAY_LABELS[d]).join("")} ${w.start}–${w.end})`
+        : `only during window #${s.gates.calendar}`,
+    );
+  }
   return parts.join("; ");
 }
 
 // ------------------------------------------------------------------ wizard
 
-const STEPS = ["Device", "Keys", "Rituals", "Review"];
+const STEPS = ["Device", "Keys", "Zones", "Rituals", "Review"];
+
+function ZonesStep({ cfg, onChange }: { cfg: DeviceConfig; onChange: (c: DeviceConfig) => void }) {
+  const zones = cfg.zones ?? [];
+  const calendars = cfg.calendars ?? [];
+  const setZone = (i: number, z: Zone) => onChange({ ...cfg, zones: zones.map((x, j) => (j === i ? z : x)) });
+  const setCal = (i: number, c: CalendarWindow) =>
+    onChange({ ...cfg, calendars: calendars.map((x, j) => (j === i ? c : x)) });
+  return (
+    <div className="step">
+      <p className="stephint">
+        Optional context rituals can require. <strong>Zones</strong> are geofences — a ritual can
+        demand the lock itself sits inside one (portable locks carry their own GNSS).{" "}
+        <strong>Time windows</strong> restrict when a ritual works at all. Define them here, then
+        attach them under a ritual&apos;s <em>advanced gates</em>. Skip this step if you don&apos;t
+        need either.
+      </p>
+
+      <h4>Zones</h4>
+      {zones.map((z, i) => (
+        <fieldset className="editor-row" key={i} data-testid={`zone-${i}`}>
+          <legend>zone {i}</legend>
+          <label className="field">
+            name
+            <input data-testid={`zone-${i}-name`} value={z.name} onChange={(e) => setZone(i, { ...z, name: e.target.value })} />
+          </label>
+          <label className="field">
+            latitude
+            <input data-testid={`zone-${i}-lat`} type="number" step="any" value={z.lat} onChange={(e) => setZone(i, { ...z, lat: Number(e.target.value) })} />
+          </label>
+          <label className="field">
+            longitude
+            <input data-testid={`zone-${i}-lon`} type="number" step="any" value={z.lon} onChange={(e) => setZone(i, { ...z, lon: Number(e.target.value) })} />
+          </label>
+          <Num label="radius_m" value={z.radius_m} min={10} max={65535} testid={`zone-${i}-radius`} help="circle radius in meters" onChange={(v) => setZone(i, { ...z, radius_m: v })} />
+          <button className="danger" data-testid={`zone-${i}-remove`} onClick={() => onChange({ ...cfg, zones: zones.filter((_, j) => j !== i) })}>
+            remove zone
+          </button>
+        </fieldset>
+      ))}
+      <button data-testid="cfg-add-zone" onClick={() => onChange({ ...cfg, zones: [...zones, defaultZone(zones.length)] })}>
+        + add zone
+      </button>
+
+      <h4>Time windows</h4>
+      {calendars.map((c, i) => (
+        <fieldset className="editor-row" key={i} data-testid={`cal-${i}`}>
+          <legend>window {i}</legend>
+          <label className="field">
+            name
+            <input data-testid={`cal-${i}-name`} value={c.name} onChange={(e) => setCal(i, { ...c, name: e.target.value })} />
+          </label>
+          <label className="field">
+            days
+            <span className="row daypick">
+              {DAY_LABELS.map((d, di) => (
+                <label key={d} className="day">
+                  <input
+                    type="checkbox"
+                    checked={c.days.includes(di)}
+                    onChange={(e) =>
+                      setCal(i, {
+                        ...c,
+                        days: e.target.checked ? [...c.days, di].sort() : c.days.filter((x) => x !== di),
+                      })
+                    }
+                  />
+                  {d}
+                </label>
+              ))}
+            </span>
+          </label>
+          <label className="field">
+            from
+            <input type="time" value={c.start} onChange={(e) => setCal(i, { ...c, start: e.target.value })} />
+          </label>
+          <label className="field">
+            until
+            <input type="time" value={c.end} onChange={(e) => setCal(i, { ...c, end: e.target.value })} />
+          </label>
+          <button className="danger" data-testid={`cal-${i}-remove`} onClick={() => onChange({ ...cfg, calendars: calendars.filter((_, j) => j !== i) })}>
+            remove window
+          </button>
+        </fieldset>
+      ))}
+      <button data-testid="cfg-add-calendar" onClick={() => onChange({ ...cfg, calendars: [...calendars, defaultCalendar(calendars.length)] })}>
+        + add time window
+      </button>
+    </div>
+  );
+}
 
 export default function ConfigEditor({
   cfg,
@@ -525,13 +653,24 @@ export default function ConfigEditor({
               + add key
             </button>
             <button className="primary" onClick={() => setStep(2)}>
-              Next: rituals →
+              Next: zones &amp; times →
             </button>
           </div>
         </div>
       )}
 
       {step === 2 && (
+        <>
+          <ZonesStep cfg={cfg} onChange={onChange} />
+          <div className="row">
+            <button className="primary" onClick={() => setStep(3)}>
+              Next: rituals →
+            </button>
+          </div>
+        </>
+      )}
+
+      {step === 3 && (
         <div className="step">
           <p className="stephint">
             Each <strong>ritual</strong> (slot) is an independent rule: which key it listens to, how
@@ -577,18 +716,20 @@ export default function ConfigEditor({
               s={selSlot}
               idx={Math.min(slotIdx, cfg.slots.length - 1)}
               keyCount={cfg.keys.length}
+              zones={cfg.zones ?? []}
+              calendars={cfg.calendars ?? []}
               onChange={(ns) => setSlot(Math.min(slotIdx, cfg.slots.length - 1), ns)}
             />
           )}
           <div className="row">
-            <button className="primary" onClick={() => setStep(3)}>
+            <button className="primary" onClick={() => setStep(4)}>
               Next: review →
             </button>
           </div>
         </div>
       )}
 
-      {step === 3 && (
+      {step === 4 && (
         <div className="step" data-testid="cfg-review">
           <p className="stephint">Read this back like a contract — it is exactly what the device will enforce.</p>
           <p>
@@ -597,7 +738,7 @@ export default function ConfigEditor({
           </p>
           <ol className="review-list">
             {cfg.slots.map((s, i) => (
-              <li key={i}>{describeSlot(s)}</li>
+              <li key={i}>{describeSlot(s, cfg.zones ?? [], cfg.calendars ?? [])}</li>
             ))}
           </ol>
           {onPush ? (

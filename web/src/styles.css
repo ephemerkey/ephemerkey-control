@@ -338,6 +338,16 @@ details.advanced[open] > summary {
   margin: 0.35rem 0;
   font-size: 0.88rem;
 }
+.daypick {
+  gap: 0.25rem;
+}
+.day {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  font-size: 0.72rem;
+  opacity: 0.85;
+}
 
 /* structured config editor */
 .config-editor .field,

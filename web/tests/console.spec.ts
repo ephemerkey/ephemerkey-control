@@ -202,6 +202,13 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await page.getByTestId("key-1-mode").selectOption("scatter");
   await page.getByTestId("key-1-once").selectOption("refuse");
 
+  // Zones & times: define a named zone the gates can reference.
+  await page.getByTestId("step-zones").click();
+  await page.getByTestId("cfg-add-zone").click();
+  await page.getByTestId("zone-0-name").fill("workshop");
+  await page.getByTestId("zone-0-lat").fill("52.1");
+  await page.getByTestId("zone-0-radius").fill("250");
+
   await page.getByTestId("step-rituals").click();
   await page.getByTestId("slot-0-action").selectOption("duress");
   await page.getByTestId("slot-0-policy-quorum").click();
@@ -221,7 +228,7 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await page.getByTestId("slot-3-policy-path").click();
   await page.getByTestId("slot-3-path-legs").fill("1,0");
   await page.getByTestId("slot-3-adv").click();
-  await page.getByTestId("slot-3-fence").fill("0");
+  await page.getByTestId("slot-3-fence").selectOption({ label: "workshop" });
 
   // Review reads back the contract, and push works right here.
   await page.getByTestId("step-review").click();
@@ -229,6 +236,7 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await expect(review).toContainText("2 distinct keys");
   await expect(review).toContainText("DURESS-UNLOCK");
   await expect(review).toContainText("locks out for 120s");
+  await expect(review).toContainText("only inside zone 'workshop'");
   await page.getByTestId("cfg-push").click();
   await expect(page.getByTestId("status-push")).toContainText("sealed & pushed");
 
@@ -248,6 +256,7 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   expect(cfg.slots[2].policy).toMatchObject({ type: "deadman", beat_s: 7200 });
   expect(cfg.slots[3].policy).toMatchObject({ type: "path", leg_keys: [1, 0] });
   expect(cfg.slots[3].gates.fence).toBe(0);
+  expect(cfg.zones[0]).toMatchObject({ name: "workshop", lat: 52.1, radius_m: 250 });
 
   // Bidirectional: hand-edit the JSON, the wizard follows (client-side nav).
   doc.devices[mockId].slots[2].policy.beat_s = 60;
