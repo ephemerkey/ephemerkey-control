@@ -33,7 +33,7 @@ import {
   wrappedFor,
 } from "./lib/keys";
 import { seal, sign1 } from "./lib/cose";
-import { configFeatures } from "./lib/config";
+import { configFeatures, flattenDeviceConfig } from "./lib/config";
 
 const SOURCE_TEMPLATE = JSON.stringify(
   { format: "ekctl-source-v1", devices: {}, notes: "" },
@@ -370,10 +370,12 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     const cfg = doc.devices?.[d.device_id];
     if (!cfg) throw new Error("no config for this device yet — open its policies first");
     const seq = Math.max(d.latest_seq ?? 0, d.acked_seq ?? 0) + 1;
-    // Stamp the crit list: the device must understand every named feature
-    // or refuse the config (no silent downgrade on old firmware).
-    const crit = configFeatures(cfg);
-    const payload = crit.length ? { ...cfg, crit } : cfg;
+    // Resolve lock-key minter references to concrete secrets, then stamp the
+    // crit list — the device must understand every named feature or refuse
+    // the config (no silent downgrade on old firmware).
+    const flat = flattenDeviceConfig(cfg, doc);
+    const crit = configFeatures(flat);
+    const payload = crit.length ? { ...flat, crit } : flat;
     const inner = sign1(utf8ToBytes(JSON.stringify(payload)), key.pub, key.priv);
     const sealed = seal(inner, hexToBytes(d.kx_pub), seq, hexToBytes(d.device_id));
     await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/configs`, {

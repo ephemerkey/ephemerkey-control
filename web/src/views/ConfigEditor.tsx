@@ -10,7 +10,10 @@ import {
   QUORUM_UNPACED_MAX,
   configFeatures,
   defaultChain,
+  defaultConfirm,
+  KeySource,
   lintConfig,
+  Minter,
   defaultCalendar,
   defaultKey,
   defaultPolicy,
@@ -791,6 +794,126 @@ function describeGenKey(k: KeyDef, idx: number, zones: Zone[]): string {
   return parts.join("; ");
 }
 
+// -------------------------------------------------------- lock keys step
+
+function sameSource(a: KeySource | undefined, b: KeySource): boolean {
+  if (!a) return false;
+  if ("device" in a && "device" in b) return a.device === b.device && a.key === b.key;
+  if ("auth" in a && "auth" in b) return a.auth === b.auth && a.key === b.key;
+  return false;
+}
+
+function LockKeysStep({
+  cfg,
+  minters,
+  onChange,
+  onNext,
+}: {
+  cfg: DeviceConfig;
+  minters: Minter[];
+  onChange: (c: DeviceConfig) => void;
+  onNext: () => void;
+}) {
+  const c = cfg.confirm ?? defaultConfirm();
+  const [reveal, setReveal] = useState(false);
+  // Which lock-key index (if any) validates a given minter.
+  const idxOf = (m: Minter) => cfg.keys.findIndex((k) => sameSource(k.source, m.ref));
+
+  function toggle(m: Minter, on: boolean) {
+    if (on) {
+      if (idxOf(m) >= 0) return;
+      onChange({ ...cfg, keys: [...cfg.keys, { secret: "", digits: m.digits, source: m.ref }] });
+    } else {
+      const i = idxOf(m);
+      if (i < 0) return;
+      // Removing a key shifts indices; drop slots that referenced it and
+      // clamp the rest so nothing points at the wrong secret.
+      const keys = cfg.keys.filter((_, j) => j !== i);
+      const slots = cfg.slots
+        .filter((s) => s.key !== i)
+        .map((s) => ({ ...s, key: s.key > i ? s.key - 1 : s.key }));
+      onChange({ ...cfg, keys, slots });
+    }
+  }
+
+  return (
+    <div className="step">
+      <p className="stephint">
+        A lock <em>validates</em> codes — it doesn&apos;t invent them. Select which minter keys this
+        lock accepts: each is a secret defined on an ephemerkey <strong>generator</strong> or a
+        third-party <strong>authenticator</strong> in this pool. The rituals step then decides what
+        entering each key&apos;s codes does.
+      </p>
+
+      {minters.length === 0 ? (
+        <div className="card" data-testid="lock-no-minters">
+          <p>
+            No minter keys in this pool yet. First add a <strong>generator</strong> device (or an
+            authenticator app) and define its keys — then come back and select them here.
+          </p>
+        </div>
+      ) : (
+        <fieldset className="editor-row">
+          <legend>accepted keys</legend>
+          {minters.map((m, i) => {
+            const on = idxOf(m) >= 0;
+            return (
+              <label className="field" key={i}>
+                <span className="row">
+                  <input type="checkbox" data-testid={`lock-minter-${i}`} checked={on} onChange={(e) => toggle(m, e.target.checked)} />
+                  {m.label}
+                </span>
+              </label>
+            );
+          })}
+        </fieldset>
+      )}
+
+      <fieldset className="editor-row">
+        <legend>receipt identity (this lock&apos;s own)</legend>
+        <p className="fieldhelp">
+          The lock <strong>mints</strong> confirm-TOTP receipts on every fire/relock from this
+          secret — the one thing a lock owns. Validators (a generator&apos;s receipt chain, the
+          events view) hold the same secret to verify.
+        </p>
+        <label className="field">
+          confirm secret
+          <span className="row">
+            <input
+              data-testid="lock-confirm-secret"
+              type={reveal ? "text" : "password"}
+              autoComplete="off"
+              value={c.secret}
+              onChange={(e) => onChange({ ...cfg, confirm: { ...c, secret: e.target.value } })}
+            />
+            <button type="button" onClick={() => setReveal(!reveal)}>
+              {reveal ? "hide" : "show"}
+            </button>
+          </span>
+        </label>
+        <label className="field">
+          proof mode
+          <select
+            data-testid="lock-confirm-mode"
+            value={c.mode}
+            onChange={(e) => onChange({ ...cfg, confirm: { ...c, mode: e.target.value as any } })}
+          >
+            <option value="sequence">sequence (ageless)</option>
+            <option value="time">time</option>
+            <option value="both">both</option>
+          </select>
+        </label>
+      </fieldset>
+
+      <div className="row">
+        <button className="primary" onClick={onNext}>
+          Next: zones &amp; times →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ wizard
 
 // The generator is a simple minting device — its "ritual" is where codes
@@ -910,10 +1033,14 @@ export default function ConfigEditor({
   cfg,
   onChange,
   onPush,
+  minters = [],
+  sourceDoc,
 }: {
   cfg: DeviceConfig;
   onChange: (cfg: DeviceConfig) => void;
   onPush?: () => void;
+  minters?: Minter[];
+  sourceDoc?: any;
 }) {
   const [stepName, setStepName] = useState("Device");
   const [slotIdx, setSlotIdx] = useState(0);
@@ -963,24 +1090,13 @@ export default function ConfigEditor({
         </div>
       )}
 
-      {step === "Keys" && (
+      {step === "Keys" && cfg.role === 1 && (
         <div className="step">
           <p className="stephint">
-            {cfg.role === 1 ? (
-              <>
-                This generator&apos;s minting keys. Each is a TOTP secret; under <em>advanced</em>{" "}
-                you can zone-bind it (codes only mint inside a place — the code proves where it was
-                minted), shape the display ritual (scatter, show-once, poison decoys), and chain it
-                to the lock&apos;s receipts.
-              </>
-            ) : (
-              <>
-                The secrets this lock accepts. A key here matches the generator (or exported
-                authenticator) holding the same secret; the rituals in the next step decide what
-                entering its codes does. Display rituals and receipt chains are configured on the
-                generator device.
-              </>
-            )}
+            This generator&apos;s minting keys. Each is a TOTP secret; under <em>advanced</em> you
+            can zone-bind it (codes only mint inside a place — the code proves where it was minted),
+            shape the display ritual (scatter, show-once, poison decoys), and chain it to the
+            lock&apos;s receipts.
           </p>
           {cfg.keys.map((k, i) => (
             <KeyRow
@@ -1003,6 +1119,10 @@ export default function ConfigEditor({
             </button>
           </div>
         </div>
+      )}
+
+      {step === "Keys" && cfg.role === 2 && (
+        <LockKeysStep cfg={cfg} minters={minters} onChange={onChange} onNext={() => setStepName("Zones")} />
       )}
 
       {step === "Zones" && (
@@ -1098,7 +1218,7 @@ export default function ConfigEditor({
               ))}
             </ol>
           )}
-          {lintConfig(cfg).map((issue, i) => (
+          {lintConfig(cfg, sourceDoc).map((issue, i) => (
             <p key={i} className={`inline-status ${issue.level === "error" ? "err" : "ok"}`} data-testid={`cfg-lint-${issue.level}`}>
               {issue.level === "error" ? "⚠ " : "note: "}
               {issue.msg}

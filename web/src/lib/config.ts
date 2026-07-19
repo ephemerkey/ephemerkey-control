@@ -29,7 +29,18 @@ export interface KeyChain {
   max_age_s: number; // accepted receipt age for TIME proofs (travel time)
 }
 
+/** Where a lock-controller key's codes are MINTED. A lock validates codes;
+ *  it can't invent a secret nothing produces, so each of its keys references
+ *  a minter elsewhere in the pool — an ephemerkey generator key or a
+ *  third-party authenticator key. Resolved to the real secret only at push. */
+export type KeySource =
+  | { device: string; key: number } // an ephemerkey generator's key
+  | { auth: string; key: number }; // a third-party authenticator's key
+
 export interface KeyDef {
+  // On a GENERATOR these are the minting secrets (defined here). On a
+  // LOCK-CONTROLLER a key instead carries `source` and `secret` is filled in
+  // (resolved) only when the config is sealed for the device.
   secret: string; // raw TOTP secret; never leaves the manager's browser unsealed
   digits: number; // 4..10, default 6
   decoy?: number; // index of this key's decoy twin in keys[]
@@ -38,6 +49,63 @@ export interface KeyDef {
   /** Generator zone binding: this key's codes only mint inside zones[zone]
    *  — a code then proves where it was minted (zone-keyed secrets). */
   zone?: number;
+  /** Lock-controller only: the minter whose codes this key validates. */
+  source?: KeySource;
+}
+
+export interface Minter {
+  ref: KeySource;
+  label: string;
+  secret: string;
+  digits: number;
+}
+
+/** Every key that mints codes in the pool: generator device keys + resolved
+ *  authenticator keys. `nameOf` labels a device id (roster names live on the
+ *  server, not the source doc). */
+export function enumerateMinters(doc: any, nameOf: (id: string) => string): Minter[] {
+  const out: Minter[] = [];
+  const devices: Record<string, DeviceConfig> = doc?.devices ?? {};
+  for (const [id, cfg] of Object.entries(devices)) {
+    if (cfg?.role !== 1) continue; // generators only
+    (cfg.keys ?? []).forEach((k, i) => {
+      out.push({ ref: { device: id, key: i }, label: `${nameOf(id)} · key ${i}`, secret: k.secret, digits: k.digits });
+    });
+  }
+  const auths: Record<string, Authenticator> = doc?.authenticators ?? {};
+  for (const [id, a] of Object.entries(auths)) {
+    (a.keys ?? []).forEach((sk, i) => {
+      const r = resolveSoftKey(sk, devices);
+      if (r) out.push({ ref: { auth: id, key: i }, label: `📱 ${a.name || id.slice(0, 6)} · ${sk.label}`, secret: r.secret, digits: r.digits });
+    });
+  }
+  return out;
+}
+
+/** The concrete secret+digits a key resolves to (following a lock source). */
+export function resolveKeySecret(k: KeyDef, doc: any): { secret: string; digits: number } | null {
+  if (k.source) {
+    if ("device" in k.source) {
+      const dk = doc?.devices?.[k.source.device]?.keys?.[k.source.key];
+      return dk ? { secret: dk.secret, digits: dk.digits } : null;
+    }
+    const sk = doc?.authenticators?.[k.source.auth]?.keys?.[k.source.key];
+    return sk ? resolveSoftKey(sk, doc?.devices ?? {}) : null;
+  }
+  return k.secret ? { secret: k.secret, digits: k.digits } : null;
+}
+
+/** Resolve a config for sealing: lock keys become plain {secret,digits}
+ *  (minters resolved); generator configs are already concrete. */
+export function flattenDeviceConfig(cfg: DeviceConfig, doc: any): DeviceConfig {
+  if (cfg.role === 1) return cfg;
+  const keys = cfg.keys.map((k) => {
+    const r = resolveKeySecret(k, doc);
+    const out: KeyDef = { secret: r?.secret ?? "", digits: r?.digits ?? 6 };
+    if (k.decoy !== undefined) out.decoy = k.decoy;
+    return out;
+  });
+  return { ...cfg, keys };
 }
 
 export function defaultChain(): KeyChain {
@@ -163,6 +231,25 @@ export function resolveSoftKey(
   return k.secret ? { secret: k.secret, digits: k.digits } : null;
 }
 
+/** The lock's confirm-TOTP receipt identity — the one secret a lock OWNS,
+ *  because it MINTS receipts (on every fire/relock). Validators (a
+ *  generator's receipt chain, the manager's event/receipt checks) hold the
+ *  same secret to verify. */
+export interface ConfirmDef {
+  secret: string;
+  digits: number;
+  mode: "sequence" | "time" | "both";
+}
+
+export function defaultConfirm(): ConfirmDef {
+  const raw = crypto.getRandomValues(new Uint8Array(20));
+  return {
+    secret: Array.from(raw, (b) => String.fromCharCode(33 + (b % 94))).join(""),
+    digits: 6,
+    mode: "sequence",
+  };
+}
+
 export interface DeviceConfig {
   role: 1 | 2; // 1 generator, 2 lock-controller
   keys: KeyDef[];
@@ -172,6 +259,8 @@ export interface DeviceConfig {
   // once the zone/calendar tables land in the pinned config doc.
   zones?: Zone[];
   calendars?: CalendarWindow[];
+  /** Lock-controller: the receipt-minting identity this lock owns. */
+  confirm?: ConfirmDef;
 }
 
 export function defaultZone(n: number): Zone {
@@ -223,7 +312,10 @@ export function defaultSlot(): SlotDef {
 }
 
 export function defaultDeviceConfig(role: 1 | 2): DeviceConfig {
-  return { role, keys: [defaultKey()], slots: [defaultSlot()] };
+  // A generator DEFINES its minting keys; a lock-controller SELECTS minter
+  // keys (starts empty) and owns only its receipt-confirm secret.
+  if (role === 1) return { role, keys: [defaultKey()], slots: [defaultSlot()] };
+  return { role, keys: [], slots: [defaultSlot()], confirm: defaultConfirm() };
 }
 
 /** Feature tags a config's security depends on — becomes its `crit` list.
@@ -265,9 +357,19 @@ export interface LintIssue {
  *  share a key make the later one unreachable (silent: a ritual the manager
  *  believes is armed can never fire). Rituals are told apart by key, never
  *  chosen by the person entering codes. */
-export function lintConfig(cfg: DeviceConfig): LintIssue[] {
+export function lintConfig(cfg: DeviceConfig, doc?: any): LintIssue[] {
   if (cfg.role !== 2) return [];
   const issues: LintIssue[] = [];
+  // Lock keys must resolve to a minter (a generator or authenticator key).
+  cfg.keys.forEach((k, i) => {
+    if (!k.source && !k.secret) {
+      issues.push({ level: "error", msg: `key ${i} has no minter — pick a generator or authenticator key that produces its codes.` });
+    } else if (k.source && doc && !resolveKeySecret(k, doc)) {
+      issues.push({ level: "error", msg: `key ${i}'s minter no longer exists in the pool — re-select it.` });
+    } else if (!k.source && k.secret) {
+      issues.push({ level: "warn", msg: `key ${i} is a standalone secret — confirm you load it into a generator or authenticator app, or it can never be minted.` });
+    }
+  });
   const owners = new Map<number, number[]>(); // key index -> slot indices
   cfg.slots.forEach((s, si) => {
     for (const k of slotKeys(s)) {
