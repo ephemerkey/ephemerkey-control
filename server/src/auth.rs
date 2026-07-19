@@ -123,8 +123,10 @@ pub fn verify_sig(
         .map_err(|_| ApiError::Unauthorized("signature verification failed".into()))
 }
 
-/// `set_id = SHA-256(owner_pub)[0..8]`, per ephemerkey DESIGN-management.md.
-pub fn set_id_from_owner_pub(owner_pub: &[u8]) -> [u8; 8] {
+/// set_id = SHA-256(owner_pub)[0..16] — 128-bit management id (harder to
+/// enumerate than the original 64-bit; device binding uses owner_pub, not
+/// this, so length is a control-plane choice).
+pub fn set_id_from_owner_pub(owner_pub: &[u8]) -> [u8; 16] {
     let digest = Sha256::digest(owner_pub);
-    digest[..8].try_into().unwrap()
+    digest[..16].try_into().unwrap()
 }

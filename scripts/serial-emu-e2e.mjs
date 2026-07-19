@@ -73,7 +73,7 @@ try {
   // Owner registers a set.
   const ownerPriv = ed25519.utils.randomPrivateKey();
   const ownerPub = ed25519.getPublicKey(ownerPriv);
-  const setId = bytesToHex(sha256(ownerPub).slice(0, 8));
+  const setId = bytesToHex(sha256(ownerPub).slice(0, 16));
   let r = await client.signedPost(ownerPriv, "ekctl-register-v1", "/api/sets", {
     owner_pub: bytesToHex(ownerPub), name: "e2e",
   });

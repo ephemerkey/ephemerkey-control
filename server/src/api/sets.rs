@@ -89,7 +89,7 @@ pub async fn roster(
     Path(set_id_hex): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let set_id = parse_hex("set_id", &set_id_hex, Some(8))?;
+    let set_id = parse_hex("set_id", &set_id_hex, Some(16))?;
     let path = format!("/api/sets/{}", set_id_hex.to_lowercase());
     require_manager(&st, &headers, &set_id, path.as_bytes()).await?;
 
@@ -153,7 +153,7 @@ pub async fn add_device(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let set_id = parse_hex("set_id", &set_id_hex, Some(8))?;
+    let set_id = parse_hex("set_id", &set_id_hex, Some(16))?;
     require_manager(&st, &headers, &set_id, &body).await?;
 
     let req: AddDeviceReq = serde_json::from_slice(&body)
@@ -204,7 +204,7 @@ pub async fn put_config(
     body: Bytes,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     use base64::Engine as _;
-    let set_id = parse_hex("set_id", &set_id_hex, Some(8))?;
+    let set_id = parse_hex("set_id", &set_id_hex, Some(16))?;
     require_manager(&st, &headers, &set_id, &body).await?;
 
     let req: PutConfigReq = serde_json::from_slice(&body)
@@ -266,7 +266,7 @@ pub async fn events(
     Path(set_id_hex): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let set_id = parse_hex("set_id", &set_id_hex, Some(8))?;
+    let set_id = parse_hex("set_id", &set_id_hex, Some(16))?;
     let path = format!("/api/sets/{}/events", set_id_hex.to_lowercase());
     require_manager(&st, &headers, &set_id, path.as_bytes()).await?;
 
@@ -301,7 +301,7 @@ pub async fn list_configs(
     Path(set_id_hex): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let set_id = parse_hex("set_id", &set_id_hex, Some(8))?;
+    let set_id = parse_hex("set_id", &set_id_hex, Some(16))?;
     let path = format!("/api/sets/{}/configs", set_id_hex.to_lowercase());
     require_manager(&st, &headers, &set_id, path.as_bytes()).await?;
 
@@ -334,7 +334,7 @@ pub async fn get_config_blob(
     Path((set_id_hex, device_id_hex, seq)): Path<(String, String, i64)>,
     headers: HeaderMap,
 ) -> Result<impl axum::response::IntoResponse, ApiError> {
-    let set_id = parse_hex("set_id", &set_id_hex, Some(8))?;
+    let set_id = parse_hex("set_id", &set_id_hex, Some(16))?;
     let device_id = parse_hex("device_id", &device_id_hex, None)?;
     let path = format!(
         "/api/sets/{}/configs/{}/{}",
@@ -378,7 +378,7 @@ pub async fn put_set_blob(
     body: Bytes,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     check_blob_kind(&kind)?;
-    let set_id = parse_hex("set_id", &set_id_hex, Some(8))?;
+    let set_id = parse_hex("set_id", &set_id_hex, Some(16))?;
     if body.is_empty() || body.len() > 256 * 1024 {
         return Err(ApiError::BadRequest("blob must be 1..=262144 bytes".into()));
     }
@@ -407,7 +407,7 @@ pub async fn get_set_blob(
     headers: HeaderMap,
 ) -> Result<impl axum::response::IntoResponse, ApiError> {
     check_blob_kind(&kind)?;
-    let set_id = parse_hex("set_id", &set_id_hex, Some(8))?;
+    let set_id = parse_hex("set_id", &set_id_hex, Some(16))?;
     if kind == "source" {
         let path = format!("/api/sets/{}/blobs/source", set_id_hex.to_lowercase());
         require_manager(&st, &headers, &set_id, path.as_bytes()).await?;

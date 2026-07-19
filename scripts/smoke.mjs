@@ -26,7 +26,7 @@ check("health", health.ok === true);
 
 const priv = ed25519.utils.randomPrivateKey();
 const pub = ed25519.getPublicKey(priv);
-const setId = bytesToHex(sha256(pub).slice(0, 8));
+const setId = bytesToHex(sha256(pub).slice(0, 16));
 
 // Register the set (signature proves key possession).
 let r = await signedPost(priv, "ekctl-register-v1", "/api/sets", { owner_pub: bytesToHex(pub), name: "smoke" });

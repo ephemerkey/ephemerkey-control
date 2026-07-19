@@ -482,3 +482,7 @@ a {
   .print-card { position: absolute; inset: 0; border: none; }
   .print-hide { display: none !important; }
 }
+
+.keyqr-block { margin: 0.6rem 0; }
+.keyqr-block h4 { margin: 0.4rem 0 0.2rem; }
+.keyqr-block code { font-size: 0.62rem; word-break: break-all; }

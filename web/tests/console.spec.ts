@@ -5,6 +5,7 @@
 
 import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import QRCode from "qrcode";
 
 test.describe.configure({ mode: "serial" });
 
@@ -42,10 +43,38 @@ test("creating a pool prompts to save the recovery id", async ({ page }) => {
   await page.getByTestId("create-pass").fill(POOLPASS);
   await page.getByTestId("owner-generate").click();
   const shown = (await page.getByTestId("recovery-setid").innerText()).trim();
-  expect(shown).toMatch(/^[0-9a-f]{16}$/);
+  expect(shown).toMatch(/^[0-9a-f]{32}$/);
   await expect(page.getByTestId("recovery-card")).toContainText("recovery id");
   await page.getByTestId("recovery-continue").click();
   await expect(page.getByTestId("set-id")).toHaveText(shown);
+});
+
+test("key QR round-trips: create, then import from a photo + passphrase", async ({ page, browser }) => {
+  await page.goto("/devices");
+  await page.getByTestId("create-pass").fill(POOLPASS);
+  await page.getByTestId("owner-generate").click();
+  const sid = (await page.getByTestId("recovery-setid").innerText()).trim();
+  await page.getByTestId("recovery-qr-toggle").click();
+  const payload = (await page.getByTestId("recovery-qr-payload").innerText()).trim();
+  await page.getByTestId("recovery-continue").click();
+
+  // A printed QR photographed = this payload rendered to an image.
+  const png = await QRCode.toBuffer(payload, { width: 512, margin: 2 });
+
+  // Fresh browser (no local key): import from the QR image, still gated by
+  // the passphrase.
+  const ctx = await browser.newContext();
+  const p2 = await ctx.newPage();
+  await p2.goto("/devices");
+  await p2.getByTestId("owner-import-qr").setInputFiles({ name: "qr.png", mimeType: "image/png", buffer: png });
+  await expect(p2.getByTestId("qr-passphrase")).toBeVisible({ timeout: 15_000 });
+  await p2.getByTestId("qr-pass").fill("wrongpass");
+  await p2.getByTestId("qr-import-btn").click();
+  await expect(p2.getByTestId("status-qr")).toContainText("wrong passphrase", { timeout: 30_000 });
+  await p2.getByTestId("qr-pass").fill(POOLPASS);
+  await p2.getByTestId("qr-import-btn").click();
+  await expect(p2.getByTestId("set-id")).toHaveText(sid, { timeout: 30_000 });
+  await ctx.close();
 });
 
 test("create pool: everything loads itself", async ({ page }) => {
@@ -55,7 +84,7 @@ test("create pool: everything loads itself", async ({ page }) => {
   // Landed on Devices with the set registered and roster loaded — no
   // buttons pressed beyond "Create pool".
   setId = (await page.getByTestId("set-id").innerText()).trim();
-  expect(setId).toMatch(/^[0-9a-f]{16}$/);
+  expect(setId).toMatch(/^[0-9a-f]{32}$/);
   await expect(page.getByTestId("roster-count")).toContainText("0 device(s)");
   await expect(page.getByTestId("roster-empty")).toBeVisible();
 });

@@ -59,6 +59,9 @@ interface Pool {
   lockNow: () => void;
   renameActive: (name: string) => void;
   adopt: (k: OwnerKey, name?: string) => void;
+  /** Adopt a pool from a passphrase-wrapped blob (key QR / server keywrap):
+   *  unwrap with the passphrase and keep it encrypted at rest. */
+  adoptWrapped: (wrapped: Uint8Array, passphrase: string) => void;
   /** Create a new pool: register it, back the key up to the server under a
    *  passphrase (default), and encrypt browser storage under the same one. */
   createPool: (passphrase: string, name?: string) => Promise<void>;
@@ -277,6 +280,17 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     refreshPools();
   }
 
+  function adoptWrapped(wrapped: Uint8Array, passphrase: string) {
+    const k = importKeyFile(unwrapKeyfile(wrapped, passphrase));
+    // Keep it encrypted at rest — we already hold the exact wrapped blob.
+    addPoolEncrypted(k, wrapped);
+    setActive(setIdFromPub(k.pub));
+    setLocked(false);
+    setLockedSetId(null);
+    setKey(k);
+    refreshPools();
+  }
+
   async function createPool(passphrase: string, name?: string) {
     if (passphrase.length < 8) throw new Error("passphrase must be at least 8 characters");
     const k = generateOwnerKey();
@@ -372,6 +386,7 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     lockNow,
     renameActive,
     adopt,
+    adoptWrapped,
     createPool,
     justCreated,
     dismissCreated: () => setJustCreated(null),

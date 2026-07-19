@@ -27,9 +27,9 @@ export function ownerKeyFromPriv(privHex: string): OwnerKey {
   return { priv, pub: ed25519.getPublicKey(priv) };
 }
 
-/** set_id = SHA-256(owner_pub)[0..8], per ephemerkey DESIGN-management.md. */
+/** set_id = SHA-256(owner_pub)[0..16] (128-bit, hard to enumerate). */
 export function setIdFromPub(pub: Uint8Array): string {
-  return bytesToHex(sha256(pub).slice(0, 8));
+  return bytesToHex(sha256(pub).slice(0, 16));
 }
 
 // At-rest browser storage holds MULTIPLE pools, each independently either
@@ -226,4 +226,30 @@ export function signEk1(
   msg.set(nonce, ctx.length);
   msg.set(digest, ctx.length + nonce.length);
   return bytesToHex(ed25519.sign(msg, key.priv));
+}
+
+// --- key QR: the passphrase-wrapped key as a scannable payload -----------
+// The QR carries the SAME Argon2id+XChaCha20 keywrap blob stored on the
+// server, so a scan still needs the passphrase to open it — a self-
+// contained encrypted paper backup.
+
+export interface KeyQr {
+  setId: string;
+  wrapped: Uint8Array;
+}
+
+export function keyQrPayload(setId: string, wrapped: Uint8Array): string {
+  return JSON.stringify({
+    f: "ekctl-keyqr-v1",
+    s: setId,
+    w: btoa(String.fromCharCode(...wrapped)),
+  });
+}
+
+export function parseKeyQr(text: string): KeyQr {
+  const o = JSON.parse(text) as { f?: string; s?: string; w?: string };
+  if (o.f !== "ekctl-keyqr-v1" || !o.s || !o.w) {
+    throw new Error("not an ephemerkey key QR");
+  }
+  return { setId: o.s, wrapped: Uint8Array.from(atob(o.w), (c) => c.charCodeAt(0)) };
 }

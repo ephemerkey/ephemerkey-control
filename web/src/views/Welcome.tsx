@@ -3,10 +3,11 @@
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { importKeyFile } from "../lib/keys";
+import { importKeyFile, parseKeyQr } from "../lib/keys";
 import { getKeywrapBlob } from "../lib/api";
 import { unwrapKeyfile } from "../lib/backup";
 import { setIdFromPub } from "../lib/keys";
+import { decodeQrImage } from "../lib/qr";
 import { usePool } from "../state";
 
 // `manage` = reached from an active session ("add / manage pools"); it lists
@@ -18,6 +19,8 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
   const [restorePass, setRestorePass] = useState("");
   const [createPass, setCreatePass] = useState("");
   const [busy, setBusy] = useState(false);
+  const [qr, setQr] = useState<{ setId: string; wrapped: Uint8Array } | null>(null);
+  const [qrPass, setQrPass] = useState("");
   const [note, setNote] = useState<{ id: string; kind: "ok" | "err"; text: string } | null>(null);
 
   const goManager = () => void navigate("/devices");
@@ -52,6 +55,27 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
       done();
     } catch (e) {
       setNote({ id: "key", kind: "err", text: `import failed: ${e}` });
+    }
+  }
+
+  async function scanKeyQr(file: File) {
+    try {
+      setQr(parseKeyQr(await decodeQrImage(file)));
+      setNote(null);
+    } catch (e) {
+      setNote({ id: "qr", kind: "err", text: `couldn't read key QR: ${e}` });
+    }
+  }
+
+  function importFromQr() {
+    if (!qr) return;
+    try {
+      pool.adoptWrapped(qr.wrapped, qrPass);
+      setQr(null);
+      setQrPass("");
+      done();
+    } catch (e) {
+      setNote({ id: "qr", kind: "err", text: `import failed: ${e}` });
     }
   }
 
@@ -110,7 +134,7 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
         <p>
           Generates a fresh owner key and registers its set. Choose a passphrase: it encrypts the
           key in this browser and stores an encrypted backup on the server, so the pool is
-          recoverable with its set_id + this passphrase. Keep it — losing it (with no exported
+          recoverable with its recovery id + this passphrase. Keep it — losing it (with no exported
           keyfile) means re-enrolling every device.
         </p>
         <div className="row">
@@ -130,18 +154,53 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
       </div>
 
       <div className="card">
-        <h3>I have a keyfile</h3>
-        <p>From your own backup or a co-manager.</p>
-        <label className="filebtn">
-          Import keyfile…
-          <input
-            data-testid="owner-import"
-            type="file"
-            accept="application/json"
-            hidden
-            onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])}
-          />
-        </label>
+        <h3>I have a keyfile or a printed key QR</h3>
+        <p>From your own backup or a co-manager. The keyfile is unencrypted; the key QR needs its passphrase.</p>
+        <div className="row">
+          <label className="filebtn">
+            Import keyfile…
+            <input
+              data-testid="owner-import"
+              type="file"
+              accept="application/json"
+              hidden
+              onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])}
+            />
+          </label>
+          <label className="filebtn">
+            Import from key QR (photo)…
+            <input
+              data-testid="owner-import-qr"
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => e.target.files?.[0] && scanKeyQr(e.target.files[0])}
+            />
+          </label>
+        </div>
+        {qr && (
+          <div className="row" data-testid="qr-passphrase">
+            <span className="hint">
+              key QR for <code>{qr.setId}</code> — enter its passphrase
+            </span>
+            <input
+              data-testid="qr-pass"
+              type="password"
+              placeholder="passphrase"
+              value={qrPass}
+              onChange={(e) => setQrPass(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && importFromQr()}
+            />
+            <button className="primary" data-testid="qr-import-btn" onClick={importFromQr}>
+              Unlock &amp; import
+            </button>
+          </div>
+        )}
+        {note?.id === "qr" && (
+          <p className={`inline-status ${note.kind}`} data-testid="status-qr">
+            {note.text}
+          </p>
+        )}
       </div>
 
       <div className="card">
@@ -150,7 +209,7 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
         <div className="row">
           <input
             data-testid="restore-setid"
-            placeholder="set_id (16 hex chars)"
+            placeholder="set_id (32 hex chars)"
             value={restoreSetId}
             onChange={(e) => setRestoreSetId(e.target.value)}
           />

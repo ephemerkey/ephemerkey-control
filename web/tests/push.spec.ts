@@ -69,7 +69,7 @@ test.beforeAll(async () => {
     owner_pub: ekenv.bytesToHex(ownerPub),
     name: "push-e2e",
   });
-  const setId = ekenv.bytesToHex(ekenv.sha256(ownerPub).slice(0, 8));
+  const setId = ekenv.bytesToHex(ekenv.sha256(ownerPub).slice(0, 16));
   await client.signedPost(ownerPriv, "ekctl-manager-v1", `/api/sets/${setId}/devices`, {
     device_id: devId,
     sign_pub: ekenv.bytesToHex(fields[2]),
