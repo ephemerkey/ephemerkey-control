@@ -14,8 +14,10 @@ blobs.
 ## Layout
 
 - `server/` — `ekctl-server` (axum, SQLite via sqlx, capability-auth `EK1`).
-  Depends on `../ephemerkey/firmware/ephemerkey-core` (path) for shared
-  validation logic — keep both repos checked out side by side.
+  Depends on `../ephemerkey/firmware/ephemerkey-core` (receipt validation)
+  and `../ephemerkey/firmware/ephemerkey-envelope` (the pinned ekenv-v1
+  COSE-profile wire format; on branch `fw/stm32-embassy-rs` for now) —
+  keep both repos checked out side by side.
 - `web/` — Vite + React + TS SPA: manager console (`/`) and courier push
   page (`/push`).
 - `docs/serial-protocol.md` — the framed WebSerial/USB-CDC contract (draft;
