@@ -320,14 +320,17 @@ export function PoolProvider({ children }: { children: ReactNode }) {
    *  keyfile, or key QR. */
   function forgetPool(target: string) {
     const wasCurrent = target === setId || target === lockedSetId;
-    const next = removePool(target);
-    refreshPools();
+    removePool(target);
     if (wasCurrent) {
+      // Don't auto-open another (possibly encrypted) pool — that would drop
+      // the user onto an unlock gate they didn't ask for. Clear the active
+      // pool; the app shows the pool list so they explicitly pick the next.
+      setActive(null);
       setKey(null);
       setLocked(false);
       setLockedSetId(null);
-      if (next) switchPool(next);
     }
+    refreshPools();
   }
 
   /** Forget the active (or locked) pool from this browser. */

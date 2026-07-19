@@ -41,7 +41,9 @@ function PoolSwitcher() {
 function ManagerArea() {
   const pool = usePool();
   if (pool.locked) return <Unlock />;
-  if (!pool.key) return <Welcome />;
+  // No active key: if this browser still knows pools, show the pool list to
+  // pick/unlock one; only a truly empty browser gets the create/import gate.
+  if (!pool.key) return pool.pools.length > 0 ? <Welcome manage /> : <Welcome />;
   if (pool.justCreated) return <RecoveryCard />;
   return (
     <div className="layout">

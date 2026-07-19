@@ -576,6 +576,39 @@ test("forget a pool removes it from this browser only", async ({ page }) => {
   await expect(page.getByTestId("set-id")).toHaveText(drop, { timeout: 30_000 });
 });
 
+test("forgetting the active pool shows the pool list, not a surprise unlock", async ({ page }) => {
+  await page.goto("/devices");
+  await newPool(page);
+  const other = (await page.getByTestId("set-id").innerText()).trim();
+  await page.getByTestId("nav-pools").click();
+  await newPool(page);
+  const active = (await page.getByTestId("set-id").innerText()).trim();
+
+  // Forget the ACTIVE pool.
+  await page.getByTestId("nav-pools").click();
+  await page.getByTestId(`pool-forget-${active}`).click();
+  await page.getByTestId(`pool-forget-confirm-${active}`).click();
+
+  // We land on the pool list (the other pool), NOT an unlock gate or a
+  // phantom pool. No sidebar set-id (no active key), no unlock prompt.
+  await expect(page.getByTestId(`pool-open-${other}`)).toBeVisible();
+  await expect(page.getByTestId("unlock-pass")).toHaveCount(0);
+  await expect(page.getByTestId("set-id")).toHaveCount(0);
+
+  // Explicitly opening the other pool asks for its passphrase (we chose it).
+  await page.getByTestId(`pool-open-${other}`).click();
+  await expect(page.getByTestId("unlock-pass")).toBeVisible();
+  await page.getByTestId("unlock-pass").fill(POOLPASS);
+  await page.getByTestId("unlock-btn").click();
+  await expect(page.getByTestId("set-id")).toHaveText(other, { timeout: 30_000 });
+
+  // Forgetting the last pool drops to the create/import gate.
+  await page.getByTestId("nav-pools").click();
+  await page.getByTestId(`pool-forget-${other}`).click();
+  await page.getByTestId(`pool-forget-confirm-${other}`).click();
+  await expect(page.getByTestId("owner-generate")).toBeVisible();
+});
+
 test("two pools coexist; switching to another prompts for its passphrase", async ({ page }) => {
   await page.goto("/devices");
   await newPool(page);
