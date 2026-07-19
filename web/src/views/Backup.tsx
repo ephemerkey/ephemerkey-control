@@ -101,6 +101,9 @@ export default function Backup() {
         {pool.activeEncrypted ? (
           <div className="row">
             <span className="inline-status ok">this pool is passphrase-protected in this browser</span>
+            <button data-testid="lock-now" onClick={() => pool.lockNow()}>
+              🔒 Lock now
+            </button>
             <button
               data-testid="lock-clear"
               className="danger"
@@ -122,6 +125,7 @@ export default function Backup() {
               onChange={(e) => setLockPass(e.target.value)}
             />
             <button
+              className="primary"
               data-testid="lock-set"
               onClick={() => {
                 if (lockPass.length < 8) {
@@ -130,10 +134,10 @@ export default function Backup() {
                 }
                 pool.setBrowserPassphrase(lockPass);
                 setLockPass("");
-                setNoteBackup({ kind: "ok", text: "browser locked — you'll need this passphrase on next load" });
+                pool.lockNow(); // require it right away, not just next load
               }}
             >
-              Lock this browser
+              Set passphrase &amp; lock
             </button>
           </div>
         )}

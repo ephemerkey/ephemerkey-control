@@ -5,13 +5,21 @@
 
 import { createContext, ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils";
-import { CTX_REGISTER, getSourceBlob, putSourceBlob, signedGet, signedPost } from "./lib/api";
+import {
+  CTX_REGISTER,
+  getSourceBlob,
+  putKeywrapBlob,
+  putSourceBlob,
+  signedGet,
+  signedPost,
+} from "./lib/api";
 import { deriveKx, sealToKx, unsealWithSeed, unwrapKeyfile, wrapKeyfile } from "./lib/backup";
 import {
   activeSetId,
   addPoolEncrypted,
   addPoolPlain,
   exportKeyFile,
+  generateOwnerKey,
   importKeyFile,
   isEncrypted,
   listPools,
@@ -47,8 +55,13 @@ interface Pool {
   activeEncrypted: boolean;
   setBrowserPassphrase: (passphrase: string) => void;
   clearBrowserPassphrase: () => void;
+  /** Drop the in-memory key now and require the passphrase again. */
+  lockNow: () => void;
   renameActive: (name: string) => void;
   adopt: (k: OwnerKey, name?: string) => void;
+  /** Create a new pool: register it, back the key up to the server under a
+   *  passphrase (default), and encrypt browser storage under the same one. */
+  createPool: (passphrase: string, name?: string) => Promise<void>;
   forget: () => void;
   roster: any;
   rosterError: string | null;
@@ -127,6 +140,16 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     const wrapped = wrapKeyfile(exportKeyFile(key), passphrase);
     addPoolEncrypted(key, wrapped);
     refreshPools();
+  }
+
+  /** Immediately re-lock: drop the in-memory key so access needs the
+   *  passphrase again, without waiting for a page reload. */
+  function lockNow() {
+    const id = setId ?? activeSetId();
+    if (!id || !isEncrypted(id)) return; // nothing to unlock back with
+    setKey(null);
+    setLocked(true);
+    setLockedSetId(id);
   }
 
   function clearBrowserPassphrase() {
@@ -249,6 +272,26 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     refreshPools();
   }
 
+  async function createPool(passphrase: string, name?: string) {
+    if (passphrase.length < 8) throw new Error("passphrase must be at least 8 characters");
+    const k = generateOwnerKey();
+    const id = setIdFromPub(k.pub);
+    const wrapped = wrapKeyfile(exportKeyFile(k), passphrase);
+    // Encrypt browser storage up front (synchronous) and adopt in memory —
+    // the key is never at rest in the clear, even for the moment the
+    // network backup is in flight.
+    addPoolEncrypted(k, wrapped, name);
+    setActive(id);
+    setLocked(false);
+    setLockedSetId(null);
+    setKey(k);
+    refreshPools();
+    // Then register the set and default to a server keywrap backup so the
+    // key is recoverable — a pool must not exist only as browser state.
+    await ensureRegistered(k);
+    await putKeywrapBlob(k, id, wrapped);
+  }
+
   /** Remove the active pool from this browser and switch to another (or none). */
   function forget() {
     if (!setId && !lockedSetId) return;
@@ -320,8 +363,10 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     activeEncrypted: setId ? isEncrypted(setId) : false,
     setBrowserPassphrase,
     clearBrowserPassphrase,
+    lockNow,
     renameActive,
     adopt,
+    createPool,
     forget,
     roster,
     rosterError,

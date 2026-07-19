@@ -58,8 +58,8 @@ export default function DeviceDetail() {
         {rosterDev?.name || "device"} <code>{id.slice(0, 16)}</code>
       </h2>
       {rosterDev ? (
-        <p className="hint">
-          {rosterDev.role === 1 ? "generator" : "lock-controller"} · fw {rosterDev.fw ?? "?"} · last
+        <p className="hint" data-testid="device-role">
+          {(cfg?.role ?? rosterDev.role) === 1 ? "generator" : "lock-controller"} · fw {rosterDev.fw ?? "?"} · last
           seen {rosterDev.last_seen_at ? new Date(rosterDev.last_seen_at * 1000).toLocaleString() : "never"} ·
           acked seq {rosterDev.acked_seq}
           {rosterDev.latest_seq > rosterDev.acked_seq ? ` (seq ${rosterDev.latest_seq} pending delivery)` : ""}

@@ -463,3 +463,5 @@ a {
 .landing-card h3 { margin: 0 0 0.3rem; }
 .landing-card p { margin: 0.2rem 0 0.4rem; font-size: 0.9rem; opacity: 0.85; }
 .pool-switcher { margin: 0.2rem 0; max-width: 100%; font-size: 0.8rem; }
+
+.lockbtn { text-align: left; font-size: 0.82rem; }

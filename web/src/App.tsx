@@ -65,6 +65,11 @@ function ManagerArea() {
         <NavLink to="/push" data-testid="nav-push">
           Courier page
         </NavLink>
+        {pool.activeEncrypted && (
+          <button data-testid="lock-now-nav" className="lockbtn" onClick={() => pool.lockNow()}>
+            🔒 Lock
+          </button>
+        )}
         <Link to="/" className="hint" data-testid="nav-home">
           ← landing
         </Link>

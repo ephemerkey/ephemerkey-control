@@ -25,9 +25,18 @@ async function openSourceText(page: any) {
   }
 }
 
+const POOLPASS = "poolpass123";
+
+// Creating a pool now requires a passphrase (encrypts at rest + server backup).
+async function newPool(page: any, pass = POOLPASS) {
+  await page.getByTestId("create-pass").fill(pass);
+  await page.getByTestId("owner-generate").click();
+  await expect(page.getByTestId("set-id")).toBeVisible({ timeout: 30_000 });
+}
+
 test("create pool: everything loads itself", async ({ page }) => {
   await page.goto("/devices");
-  await page.getByTestId("owner-generate").click();
+  await newPool(page);
 
   // Landed on Devices with the set registered and roster loaded — no
   // buttons pressed beyond "Create pool".
@@ -39,7 +48,7 @@ test("create pool: everything loads itself", async ({ page }) => {
 
 test("export keyfile, forget, import restores the same set", async ({ page }) => {
   await page.goto("/devices");
-  await page.getByTestId("owner-generate").click();
+  await newPool(page);
   const freshSetId = (await page.getByTestId("set-id").innerText()).trim();
 
   await page.getByTestId("nav-backup").click();
@@ -61,7 +70,7 @@ test("export keyfile, forget, import restores the same set", async ({ page }) =>
 
 test("store passphrase backup and sealed config source", async ({ page }) => {
   await page.goto("/devices");
-  await page.getByTestId("owner-generate").click();
+  await newPool(page);
   setId = (await page.getByTestId("set-id").innerText()).trim();
 
   await page.getByTestId("nav-backup").click();
@@ -110,7 +119,7 @@ test("wrong passphrase is rejected inline", async ({ page }) => {
 
 test("a different key is a different set with no stored source", async ({ page }) => {
   await page.goto("/devices");
-  await page.getByTestId("owner-generate").click();
+  await newPool(page);
   const otherSetId = (await page.getByTestId("set-id").innerText()).trim();
   expect(otherSetId).not.toBe(setId);
 
@@ -157,7 +166,7 @@ test("manual enroll (advanced) lands on the device page; push works", async ({ p
 test("mock device auto-registers a never-registered set", async ({ page }) => {
   // Regression: fresh key, no explicit registration, straight to mock.
   await page.goto("/devices");
-  await page.getByTestId("owner-generate").click();
+  await newPool(page);
   await page.getByTestId("nav-add").click();
   const downloadPromise = page.waitForEvent("download");
   await page.getByTestId("dev-mock").click();
@@ -419,6 +428,25 @@ test("keyfile import from another browser recovers the pool + configs", async ({
     .toBe("has-config");
 });
 
+test("switching a device's role updates its shown role", async ({ page }) => {
+  await page.goto("/devices");
+  await page.getByTestId("owner-import").setInputFiles({
+    name: "owner.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(keyfile),
+  });
+  await expect(page.getByTestId("set-id")).toHaveText(setId);
+  // The mock device enrolled as a lock in an earlier test.
+  await page.locator("tbody tr td", { hasText: "lock" }).first().waitFor();
+
+  await page.locator('[data-testid^="device-"]').first().click();
+  await page.getByTestId("cfg-role").selectOption("1"); // -> generator
+  await expect(page.getByTestId("device-role")).toContainText("generator");
+
+  await page.getByTestId("nav-devices").click();
+  await expect(page.locator("tbody")).toContainText("generator");
+});
+
 test("landing chooses between manage and program flows", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("landing-manage")).toBeVisible();
@@ -430,37 +458,45 @@ test("landing chooses between manage and program flows", async ({ page }) => {
   await expect(page.getByTestId("owner-generate")).toBeVisible();
 });
 
-test("browser passphrase locks the pool and unlock restores it", async ({ page }) => {
+test("a created pool is encrypted at rest; Lock now requires the passphrase", async ({ page }) => {
   await page.goto("/devices");
-  await page.getByTestId("owner-generate").click();
+  await newPool(page); // creates encrypted-by-default under POOLPASS
   const id = (await page.getByTestId("set-id").innerText()).trim();
 
-  await page.getByTestId("nav-backup").click();
-  await page.getByTestId("lock-pass").fill("stronglockpass");
-  await page.getByTestId("lock-set").click();
-  await expect(page.getByTestId("status-backup")).toContainText("browser locked");
-
-  await page.reload();
+  // Re-lock mid-session from the sidebar; access now needs the passphrase.
+  await page.getByTestId("lock-now-nav").click();
   await expect(page.getByTestId("unlock-pass")).toBeVisible();
   await page.getByTestId("unlock-pass").fill("wrongpass");
   await page.getByTestId("unlock-btn").click();
   await expect(page.getByTestId("unlock-err")).toContainText("wrong passphrase", { timeout: 30_000 });
-  await page.getByTestId("unlock-pass").fill("stronglockpass");
+  await page.getByTestId("unlock-pass").fill(POOLPASS);
+  await page.getByTestId("unlock-btn").click();
+  await expect(page.getByTestId("set-id")).toHaveText(id, { timeout: 30_000 });
+
+  // Survives a full reload (still locked at rest).
+  await page.reload();
+  await expect(page.getByTestId("unlock-pass")).toBeVisible();
+  await page.getByTestId("unlock-pass").fill(POOLPASS);
   await page.getByTestId("unlock-btn").click();
   await expect(page.getByTestId("set-id")).toHaveText(id, { timeout: 30_000 });
 });
 
-test("two pools coexist and the switcher moves between them", async ({ page }) => {
+test("two pools coexist; switching to another prompts for its passphrase", async ({ page }) => {
   await page.goto("/devices");
-  await page.getByTestId("owner-generate").click();
+  await newPool(page);
   const first = (await page.getByTestId("set-id").innerText()).trim();
   await page.getByTestId("nav-pools").click();
-  await page.getByTestId("owner-generate").click();
+  await newPool(page);
   const second = (await page.getByTestId("set-id").innerText()).trim();
   expect(second).not.toBe(first);
+
+  // Both pools are encrypted, so selecting the other locks to its unlock gate.
   await expect(page.getByTestId("pool-switcher")).toBeVisible();
   await page.getByTestId("pool-switcher").selectOption(first);
-  await expect(page.getByTestId("set-id")).toHaveText(first);
+  await expect(page.getByTestId("unlock-pass")).toBeVisible();
+  await page.getByTestId("unlock-pass").fill(POOLPASS);
+  await page.getByTestId("unlock-btn").click();
+  await expect(page.getByTestId("set-id")).toHaveText(first, { timeout: 30_000 });
 });
 
 test("publish seals every configured device and uploads", async ({ page }) => {

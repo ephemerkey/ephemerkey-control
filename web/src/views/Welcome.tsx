@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { generateOwnerKey, importKeyFile } from "../lib/keys";
+import { importKeyFile } from "../lib/keys";
 import { getKeywrapBlob } from "../lib/api";
 import { unwrapKeyfile } from "../lib/backup";
 import { setIdFromPub } from "../lib/keys";
@@ -16,11 +16,35 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
   const navigate = useNavigate();
   const [restoreSetId, setRestoreSetId] = useState("");
   const [restorePass, setRestorePass] = useState("");
+  const [createPass, setCreatePass] = useState("");
+  const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ id: string; kind: "ok" | "err"; text: string } | null>(null);
 
+  const goManager = () => void navigate("/devices");
   const done = () => {
-    if (manage) void navigate("/devices");
+    if (manage) goManager();
   };
+
+  async function create() {
+    if (createPass.length < 8) {
+      setNote({ id: "key", kind: "err", text: "choose a passphrase of at least 8 characters" });
+      return;
+    }
+    setBusy(true);
+    try {
+      await pool.createPool(createPass);
+      setCreatePass("");
+      done(); // navigate only when adding from the manage screen
+    } catch (e) {
+      setNote({
+        id: "key",
+        kind: "err",
+        text: `couldn't create pool: ${e}. Export your keyfile from Backup & keys before relying on it.`,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function importFile(file: File) {
     try {
@@ -83,17 +107,25 @@ export default function Welcome({ manage = false }: { manage?: boolean }) {
 
       <div className="card">
         <h3>{manage ? "Add another pool" : "Start a new pool"}</h3>
-        <p>Generates a fresh owner key in this browser and registers its set.</p>
-        <button
-          className="primary"
-          data-testid="owner-generate"
-          onClick={() => {
-            pool.adopt(generateOwnerKey());
-            done();
-          }}
-        >
-          Create pool
-        </button>
+        <p>
+          Generates a fresh owner key and registers its set. Choose a passphrase: it encrypts the
+          key in this browser and stores an encrypted backup on the server, so the pool is
+          recoverable with its set_id + this passphrase. Keep it — losing it (with no exported
+          keyfile) means re-enrolling every device.
+        </p>
+        <div className="row">
+          <input
+            data-testid="create-pass"
+            type="password"
+            placeholder="passphrase (min 8 chars)"
+            value={createPass}
+            onChange={(e) => setCreatePass(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void create()}
+          />
+          <button className="primary" data-testid="owner-generate" disabled={busy} onClick={() => void create()}>
+            {busy ? "creating…" : "Create pool"}
+          </button>
+        </div>
         {note?.id === "key" && <p className={`inline-status ${note.kind}`}>{note.text}</p>}
       </div>
 

@@ -44,6 +44,15 @@ export default function Devices() {
     /* source JSON broken elsewhere — surfaced on Backup page */
   }
   const authIds = Object.keys(authenticators);
+  // The role you configure in the wizard (source doc) is the real one — the
+  // roster column only holds the enrollment-time hint. Prefer the config.
+  let cfgDevices: Record<string, any> = {};
+  try {
+    cfgDevices = JSON.parse(pool.source).devices ?? {};
+  } catch {
+    /* invalid source surfaced elsewhere */
+  }
+  const roleOf = (d: any) => (cfgDevices[d.device_id]?.role ?? d.role) === 1 ? "generator" : "lock";
 
   async function publish() {
     setNote({ kind: "ok", text: "publishing…" });
@@ -102,7 +111,7 @@ export default function Devices() {
                     <code>{d.device_id.slice(0, 16)}</code>
                   </div>
                 </td>
-                <td>{d.role === 1 ? "generator" : "lock"}</td>
+                <td>{roleOf(d)}</td>
                 <td>{d.last_seen_at ? new Date(d.last_seen_at * 1000).toLocaleString() : "never"}</td>
                 <td>
                   acked {d.acked_seq}
