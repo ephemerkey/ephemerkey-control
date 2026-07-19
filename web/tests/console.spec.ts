@@ -222,7 +222,9 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await page.getByTestId("slot-0-action").selectOption("duress");
   await page.getByTestId("slot-0-policy-quorum").click();
   await page.getByTestId("slot-0-quorum-m").fill("2");
-  await page.getByTestId("slot-0-quorum-keys").fill("0,1");
+  await page.getByTestId("slot-0-quorum-key-0").check();
+  await page.getByTestId("slot-0-quorum-key-1").check();
+  await page.getByTestId("slot-0-quorum-paced").check(); // paced quorum: 60-300s cadence
   await page.getByTestId("slot-0-adv").click();
   await page.getByTestId("slot-0-negative").selectOption("lockout");
   await page.getByTestId("slot-0-lockout").fill("120");
@@ -230,12 +232,16 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await page.getByTestId("slot-1-policy-sequence").click();
   await page.getByTestId("slot-1-seq-n").fill("4");
   await page.getByTestId("slot-1-seq-window").fill("900");
+  await page.getByTestId("slot-1-seq-jitter").fill("45"); // randomized pacing variant
   await page.getByTestId("cfg-add-slot").click();
   await page.getByTestId("slot-2-policy-deadman").click();
   await page.getByTestId("slot-2-deadman-beat").fill("7200");
   await page.getByTestId("cfg-add-slot").click();
   await page.getByTestId("slot-3-policy-path").click();
-  await page.getByTestId("slot-3-path-legs").fill("1,0");
+  await page.getByTestId("slot-3-leg-add").click();
+  await page.getByTestId("slot-3-leg-add").click();
+  await page.getByTestId("slot-3-leg-0").selectOption("1");
+  await page.getByTestId("slot-3-leg-1").selectOption("0");
   await page.getByTestId("slot-3-adv").click();
   await page.getByTestId("slot-3-fence").selectOption({ label: "workshop" });
 
@@ -245,6 +251,8 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await expect(review).toContainText("2 distinct keys");
   await expect(review).toContainText("DURESS-UNLOCK");
   await expect(review).toContainText("locks out for 120s");
+  await expect(review).toContainText("paced 60\u2013300s apart");
+  await expect(review).toContainText("jitter up to 45s");
   await expect(review).toContainText("only inside zone 'workshop'");
   await page.getByTestId("cfg-push").click();
   await expect(page.getByTestId("status-push")).toContainText("sealed & pushed");
@@ -259,9 +267,12 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   expect(cfg.slots[0]).toMatchObject({
     action: "duress",
     negative: "lockout:120",
-    policy: { type: "quorum", m: 2, keys: [0, 1], window_s: 600, alternating: false },
+    policy: {
+      type: "quorum", m: 2, keys: [0, 1], window_s: 600, alternating: false,
+      gap_min_s: 60, gap_max_s: 300,
+    },
   });
-  expect(cfg.slots[1].policy).toMatchObject({ type: "sequence", n: 4, window_s: 900 });
+  expect(cfg.slots[1].policy).toMatchObject({ type: "sequence", n: 4, window_s: 900, jitter_s: 45 });
   expect(cfg.slots[2].policy).toMatchObject({ type: "deadman", beat_s: 7200 });
   expect(cfg.slots[3].policy).toMatchObject({ type: "path", leg_keys: [1, 0] });
   expect(cfg.slots[3].gates.fence).toBe(0);

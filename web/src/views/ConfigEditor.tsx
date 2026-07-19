@@ -7,6 +7,7 @@
 import { useState } from "react";
 import {
   CalendarWindow,
+  QUORUM_UNPACED_MAX,
   defaultCalendar,
   defaultKey,
   defaultPolicy,
@@ -245,26 +246,99 @@ function KeyRow({
 
 // -------------------------------------------------------------- slots step
 
-function keyIndexList(value: number[], keyCount: number, onChange: (v: number[]) => void, testid: string, help: string) {
+/** Membership picker: which keys participate (order doesn't matter). */
+function KeyPickList({
+  value,
+  keyCount,
+  onChange,
+  testidBase,
+  help,
+}: {
+  value: number[];
+  keyCount: number;
+  onChange: (v: number[]) => void;
+  testidBase: string;
+  help: string;
+}) {
   return (
     <label className="field">
-      keys (comma-sep indices)
-      <input
-        data-testid={testid}
-        value={value.join(",")}
-        onChange={(e) =>
-          onChange(
-            e.target.value
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s !== "")
-              .map(Number)
-              .filter((n) => Number.isInteger(n) && n >= 0 && n < keyCount),
-          )
-        }
-      />
+      participating keys
+      <span className="row daypick">
+        {Array.from({ length: keyCount }, (_, i) => (
+          <label key={i} className="day">
+            <input
+              type="checkbox"
+              data-testid={`${testidBase}-${i}`}
+              checked={value.includes(i)}
+              onChange={(e) =>
+                onChange(e.target.checked ? [...value, i].sort() : value.filter((x) => x !== i))
+              }
+            />
+            key {i}
+          </label>
+        ))}
+      </span>
       <span className="fieldhelp">{help}</span>
     </label>
+  );
+}
+
+/** Ordered leg builder: a route is a list, not a comma string. */
+function LegBuilder({
+  legs,
+  keyCount,
+  onChange,
+  testidBase,
+}: {
+  legs: number[];
+  keyCount: number;
+  onChange: (v: number[]) => void;
+  testidBase: string;
+}) {
+  return (
+    <div className="legs">
+      <span className="fieldhelp">the route, in walking order — a code from each leg&apos;s key</span>
+      <ol className="leg-list">
+        {legs.map((leg, i) => (
+          <li key={i} className="row">
+            <select
+              data-testid={`${testidBase}-${i}`}
+              value={leg}
+              onChange={(e) => onChange(legs.map((x, j) => (j === i ? Number(e.target.value) : x)))}
+            >
+              {Array.from({ length: keyCount }, (_, k) => (
+                <option key={k} value={k}>
+                  key {k}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              title="move up"
+              disabled={i === 0}
+              onClick={() => {
+                const next = [...legs];
+                [next[i - 1], next[i]] = [next[i], next[i - 1]];
+                onChange(next);
+              }}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="danger"
+              data-testid={`${testidBase}-${i}-remove`}
+              onClick={() => onChange(legs.filter((_, j) => j !== i))}
+            >
+              ✕
+            </button>
+          </li>
+        ))}
+      </ol>
+      <button type="button" data-testid={`${testidBase}-add`} onClick={() => onChange([...legs, 0])}>
+        + add leg
+      </button>
+    </div>
   );
 }
 
@@ -288,13 +362,20 @@ function PolicyParams({
           <Num label="window_s" value={p.window_s} testid={`slot-${idx}-seq-window`} help="the whole sequence must fit in this window" onChange={(v) => onChange({ ...p, window_s: v })} />
           <Num label="gap_min_s" value={p.gap_min_s} help="entries closer than this are rejected — no rushing" onChange={(v) => onChange({ ...p, gap_min_s: v })} />
           <Num label="gap_max_s" value={p.gap_max_s} help="entries further apart than this reset — stay present" onChange={(v) => onChange({ ...p, gap_max_s: v })} />
+          <Num
+            label="pace jitter_s"
+            value={p.jitter_s ?? 0}
+            testid={`slot-${idx}-seq-jitter`}
+            help="0 = fixed rhythm. Otherwise each step the device secretly draws a tighter accept/reject window (by up to this many seconds) — the cadence can't be rehearsed, only felt out live"
+            onChange={(v) => onChange({ ...p, jitter_s: v })}
+          />
           <Num label="delay_min_s" value={p.delay_min_s} help="after the last code: wait at least this long" onChange={(v) => onChange({ ...p, delay_min_s: v })} />
           <Num label="delay_max_s" value={p.delay_max_s} help="…and at most this long (randomized in between)" onChange={(v) => onChange({ ...p, delay_max_s: v })} />
         </>
       )}
       {p.type === "path" && (
         <>
-          {keyIndexList(p.leg_keys, keyCount, (v) => onChange({ ...p, leg_keys: v }), `slot-${idx}-path-legs`, "the ordered legs — a code from each key, in this order")}
+          <LegBuilder legs={p.leg_keys} keyCount={keyCount} onChange={(v) => onChange({ ...p, leg_keys: v })} testidBase={`slot-${idx}-leg`} />
           <Num label="leg_deadline_s" value={p.leg_deadline_s} help="max seconds between consecutive legs" onChange={(v) => onChange({ ...p, leg_deadline_s: v })} />
           <Num label="delay_max_s" value={p.delay_max_s} help="randomized delay after the final leg" onChange={(v) => onChange({ ...p, delay_max_s: v })} />
         </>
@@ -305,13 +386,38 @@ function PolicyParams({
       {p.type === "quorum" && (
         <>
           <Num label="m (required)" value={p.m} min={1} max={16} testid={`slot-${idx}-quorum-m`} help="how many distinct keys must participate" onChange={(v) => onChange({ ...p, m: v })} />
-          {keyIndexList(p.keys, keyCount, (v) => onChange({ ...p, keys: v }), `slot-${idx}-quorum-keys`, "the group of eligible keys")}
+          <KeyPickList value={p.keys} keyCount={keyCount} onChange={(v) => onChange({ ...p, keys: v })} testidBase={`slot-${idx}-quorum-key`} help="who is eligible to contribute" />
           <Num label="window_s" value={p.window_s} help="all M codes must land inside this window" onChange={(v) => onChange({ ...p, window_s: v })} />
           <label className="field">
             alternating
             <input type="checkbox" checked={p.alternating} onChange={(e) => onChange({ ...p, alternating: e.target.checked })} />
             <span className="fieldhelp">no key may enter twice in a row</span>
           </label>
+          <label className="field">
+            paced
+            <input
+              type="checkbox"
+              data-testid={`slot-${idx}-quorum-paced`}
+              checked={(p.gap_max_s ?? QUORUM_UNPACED_MAX) < QUORUM_UNPACED_MAX}
+              onChange={(e) =>
+                onChange(
+                  e.target.checked
+                    ? { ...p, gap_min_s: 60, gap_max_s: 300 }
+                    : { ...p, gap_min_s: 0, gap_max_s: QUORUM_UNPACED_MAX },
+                )
+              }
+            />
+            <span className="fieldhelp">
+              contributions must keep a shared rhythm (like a paced sequence) — defeats one courier
+              bursting a stack of pre-minted codes
+            </span>
+          </label>
+          {(p.gap_max_s ?? QUORUM_UNPACED_MAX) < QUORUM_UNPACED_MAX && (
+            <>
+              <Num label="gap_min_s" value={p.gap_min_s ?? 0} testid={`slot-${idx}-quorum-gapmin`} help="contributions closer than this reset the round" onChange={(v) => onChange({ ...p, gap_min_s: v })} />
+              <Num label="gap_max_s" value={p.gap_max_s ?? 300} max={65534} testid={`slot-${idx}-quorum-gapmax`} help="contributions further apart than this reset the round" onChange={(v) => onChange({ ...p, gap_max_s: v })} />
+            </>
+          )}
         </>
       )}
     </div>
@@ -462,14 +568,25 @@ function describePolicy(p: Policy): string {
   switch (p.type) {
     case "always":
       return "any single valid code";
-    case "sequence":
-      return `${p.n} valid codes within ${p.window_s}s, spaced ${p.gap_min_s}–${p.gap_max_s}s apart, then a randomized ${p.delay_min_s}–${p.delay_max_s}s delay`;
+    case "sequence": {
+      const jitter = p.jitter_s ?? 0;
+      const pace =
+        jitter > 0
+          ? `spaced ${p.gap_min_s}–${p.gap_max_s}s apart with the accept window secretly re-drawn each step (jitter up to ${jitter}s)`
+          : `spaced ${p.gap_min_s}–${p.gap_max_s}s apart`;
+      return `${p.n} valid codes within ${p.window_s}s, ${pace}, then a randomized ${p.delay_min_s}–${p.delay_max_s}s delay`;
+    }
     case "path":
       return `codes from keys [${p.leg_keys.join(" → ")}] in order, each leg within ${p.leg_deadline_s}s, then up to ${p.delay_max_s}s delay`;
     case "deadman":
       return `a valid code every ${p.beat_s}s — missing a beat fires the action`;
-    case "quorum":
-      return `${p.m} distinct keys of [${p.keys.join(", ")}] within ${p.window_s}s${p.alternating ? ", strictly alternating" : ""}`;
+    case "quorum": {
+      const paced =
+        (p.gap_max_s ?? QUORUM_UNPACED_MAX) < QUORUM_UNPACED_MAX
+          ? `, paced ${p.gap_min_s}–${p.gap_max_s}s apart`
+          : "";
+      return `${p.m} distinct keys of [${p.keys.join(", ")}] within ${p.window_s}s${p.alternating ? ", strictly alternating" : ""}${paced}`;
+    }
   }
 }
 

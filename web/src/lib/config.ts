@@ -34,10 +34,25 @@ export type Policy =
       gap_max_s: number;
       delay_min_s: number;
       delay_max_s: number;
+      /** 0 = fixed rhythm; >0 = each step the device secretly tightens the
+       *  accept window by up to this many seconds (randomized pacing). */
+      jitter_s: number;
     }
   | { type: "path"; leg_keys: number[]; leg_deadline_s: number; delay_max_s: number }
   | { type: "deadman"; beat_s: number }
-  | { type: "quorum"; m: number; keys: number[]; window_s: number; alternating: boolean };
+  | {
+      type: "quorum";
+      m: number;
+      keys: number[];
+      window_s: number;
+      alternating: boolean;
+      /** Paced quorum: contributions must keep this generation cadence.
+       *  0 / 65535 = unpaced. */
+      gap_min_s: number;
+      gap_max_s: number;
+    };
+
+export const QUORUM_UNPACED_MAX = 65535;
 
 export interface SlotGates {
   fence?: number; // fence-table index the lock must be inside
@@ -109,13 +124,13 @@ export function defaultPolicy(type: Policy["type"]): Policy {
     case "always":
       return { type: "always" };
     case "sequence":
-      return { type: "sequence", n: 3, window_s: 600, gap_min_s: 60, gap_max_s: 300, delay_min_s: 0, delay_max_s: 60 };
+      return { type: "sequence", n: 3, window_s: 600, gap_min_s: 60, gap_max_s: 300, delay_min_s: 0, delay_max_s: 60, jitter_s: 0 };
     case "path":
       return { type: "path", leg_keys: [], leg_deadline_s: 900, delay_max_s: 60 };
     case "deadman":
       return { type: "deadman", beat_s: 3600 };
     case "quorum":
-      return { type: "quorum", m: 2, keys: [], window_s: 600, alternating: false };
+      return { type: "quorum", m: 2, keys: [], window_s: 600, alternating: false, gap_min_s: 0, gap_max_s: QUORUM_UNPACED_MAX };
   }
 }
 
