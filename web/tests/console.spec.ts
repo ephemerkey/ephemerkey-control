@@ -197,6 +197,8 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await page.getByTestId("cfg-add-key").click();
   await page.getByTestId("key-0-adv").click();
   await page.getByTestId("key-0-decoy").selectOption("1");
+  await page.getByTestId("key-0-chain").selectOption("on"); // witness chain
+  await page.getByTestId("key-0-chain-elapsed").fill("1200");
   await page.getByTestId("key-1-adv").click();
   await page.getByTestId("key-1-display").selectOption("custom");
   await page.getByTestId("key-1-mode").selectOption("scatter");
@@ -228,6 +230,9 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await page.getByTestId("slot-0-adv").click();
   await page.getByTestId("slot-0-negative").selectOption("lockout");
   await page.getByTestId("slot-0-lockout").fill("120");
+  await page.getByTestId("slot-0-veto-delay").fill("90"); // coercion brake
+  await page.getByTestId("slot-0-veto-key").selectOption("1");
+  await page.getByTestId("slot-0-budget").fill("3"); // dies after 3 fires
   await page.getByTestId("cfg-add-slot").click();
   await page.getByTestId("slot-1-policy-sequence").click();
   await page.getByTestId("slot-1-seq-n").fill("4");
@@ -254,7 +259,11 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   await expect(review).toContainText("paced 60\u2013300s apart");
   await expect(review).toContainText("jitter up to 45s");
   await expect(review).toContainText("only inside zone 'workshop'");
-  await expect(page.getByTestId("cfg-crit")).toContainText("quorum-pace, seq-jitter, zones");
+  await expect(review).toContainText("arms for 90s before firing — key 1 can veto");
+  await expect(review).toContainText("dies after 3 fire(s)");
+  await expect(page.getByTestId("cfg-crit")).toContainText(
+    "budget, chain, quorum-pace, seq-jitter, veto, zones",
+  );
   await page.getByTestId("cfg-push").click();
   await expect(page.getByTestId("status-push")).toContainText("sealed & pushed");
 
@@ -264,6 +273,8 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
   const doc = JSON.parse(await page.getByTestId("source-text").inputValue());
   const cfg = doc.devices[mockId];
   expect(cfg.keys[0].decoy).toBe(1);
+  expect(cfg.keys[0].chain).toMatchObject({ mode: "sequence", action: "lock", min_elapsed_s: 1200 });
+  expect(cfg.slots[0]).toMatchObject({ veto_delay_s: 90, veto_key: 1, budget: 3 });
   expect(cfg.keys[1].display).toMatchObject({ mode: "scatter", once: "refuse" });
   expect(cfg.slots[0]).toMatchObject({
     action: "duress",

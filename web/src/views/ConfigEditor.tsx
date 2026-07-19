@@ -9,6 +9,7 @@ import {
   CalendarWindow,
   QUORUM_UNPACED_MAX,
   configFeatures,
+  defaultChain,
   defaultCalendar,
   defaultKey,
   defaultPolicy,
@@ -190,6 +191,66 @@ function KeyRow({
           </select>
           <span className="fieldhelp">how the generator reveals this key&apos;s codes on its display</span>
         </label>
+        <label className="field">
+          receipt chain
+          <select
+            data-testid={`key-${idx}-chain`}
+            value={k.chain ? "on" : "off"}
+            onChange={(e) => onChange({ ...k, chain: e.target.value === "on" ? defaultChain() : undefined })}
+          >
+            <option value="off">off</option>
+            <option value="on">required</option>
+          </select>
+          <span className="fieldhelp">
+            the generator refuses to mint this key&apos;s codes until it is fed the lock&apos;s
+            receipt code (witness of the last close) and a cooling-off passes — the lock&apos;s
+            attest button re-mints a receipt any time one goes missing
+          </span>
+        </label>
+        {k.chain && (
+          <>
+            <label className="field">
+              lock confirm secret
+              <input
+                type="password"
+                autoComplete="off"
+                data-testid={`key-${idx}-chain-secret`}
+                value={k.chain.secret}
+                onChange={(e) => onChange({ ...k, chain: { ...k.chain!, secret: e.target.value } })}
+              />
+              <span className="fieldhelp">must match the lock&apos;s confirm secret (masked)</span>
+            </label>
+            <Num
+              label="min_elapsed_s"
+              value={k.chain.min_elapsed_s}
+              testid={`key-${idx}-chain-elapsed`}
+              help="cooling-off: codes mint only this long after the receipt is fed"
+              onChange={(v) => onChange({ ...k, chain: { ...k.chain!, min_elapsed_s: v } })}
+            />
+            <label className="field">
+              proof mode
+              <select
+                value={k.chain.mode}
+                onChange={(e) => onChange({ ...k, chain: { ...k.chain!, mode: e.target.value as any } })}
+              >
+                <option value="sequence">sequence — ageless (any travel time)</option>
+                <option value="time">time — receipt expires (set max age)</option>
+              </select>
+              <span className="fieldhelp">
+                sequence proofs survive any walk to a far-away generator; time proofs accept up to
+                max_age_s of travel
+              </span>
+            </label>
+            {k.chain.mode !== "sequence" && (
+              <Num
+                label="max_age_s"
+                value={k.chain.max_age_s}
+                help="how old a time-proof receipt may be (travel time allowance)"
+                onChange={(v) => onChange({ ...k, chain: { ...k.chain!, max_age_s: v } })}
+              />
+            )}
+          </>
+        )}
         {d && (
           <>
             <label className="field">
@@ -506,6 +567,50 @@ function SlotEditor({
           <Num label="lockout secs" value={lockoutSecs} testid={`slot-${idx}-lockout`} help="dead time after a wrong code" onChange={(v) => onChange({ ...s, negative: `lockout:${v}` })} />
         )}
         <label className="field">
+          veto window
+          <input
+            data-testid={`slot-${idx}-veto-delay`}
+            type="number"
+            min={0}
+            max={65535}
+            value={s.veto_delay_s ?? 0}
+            onChange={(e) => onChange({ ...s, veto_delay_s: Number(e.target.value) })}
+          />
+          <span className="fieldhelp">
+            0 = fire immediately. Otherwise a completed ritual ARMS the lock and fires only after
+            this many seconds — a window for the veto key to cancel (coercion brake)
+          </span>
+        </label>
+        {(s.veto_delay_s ?? 0) > 0 && (
+          <label className="field">
+            veto key
+            <select
+              data-testid={`slot-${idx}-veto-key`}
+              value={s.veto_key ?? 0}
+              onChange={(e) => onChange({ ...s, veto_key: Number(e.target.value) })}
+            >
+              {Array.from({ length: keyCount }, (_, i) => (
+                <option key={i} value={i}>
+                  key {i}
+                </option>
+              ))}
+            </select>
+            <span className="fieldhelp">a valid code from this key cancels the armed action</span>
+          </label>
+        )}
+        <label className="field">
+          usage budget
+          <input
+            data-testid={`slot-${idx}-budget`}
+            type="number"
+            min={0}
+            max={65535}
+            value={s.budget ?? 0}
+            onChange={(e) => onChange({ ...s, budget: Number(e.target.value) })}
+          />
+          <span className="fieldhelp">0 = unlimited; otherwise the ritual dies after this many fires (courier keys, one-time overrides)</span>
+        </label>
+        <label className="field">
           progress feedback
           <input type="checkbox" checked={s.progress} onChange={(e) => onChange({ ...s, progress: e.target.checked })} />
           <span className="fieldhelp">show ritual progress on the lock (off = fully blind entry)</span>
@@ -609,6 +714,10 @@ function describeSlot(s: SlotDef, zones: Zone[], calendars: CalendarWindow[]): s
         : `only during window #${s.gates.calendar}`,
     );
   }
+  if ((s.veto_delay_s ?? 0) > 0) {
+    parts.push(`arms for ${s.veto_delay_s}s before firing — key ${s.veto_key ?? 0} can veto`);
+  }
+  if ((s.budget ?? 0) > 0) parts.push(`dies after ${s.budget} fire(s)`);
   return parts.join("; ");
 }
 

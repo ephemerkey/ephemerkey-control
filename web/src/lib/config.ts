@@ -17,11 +17,36 @@ export interface KeyDisplay {
   gap_min_s: number; // minimum gap between reveals
 }
 
+/** Receipt chain: this key's generator refuses to mint codes until fed
+ *  the lock's receipt code, then a cooling-off. The lock's attest button
+ *  re-mints a fresh state receipt whenever one goes missing. */
+export interface KeyChain {
+  secret: string; // the lock's confirm secret
+  digits: number;
+  mode: "sequence" | "time" | "both"; // sequence = ageless (any travel time)
+  action: "lock" | "unlock"; // which receipt feeds the chain
+  min_elapsed_s: number; // cooling-off after feeding
+  max_age_s: number; // accepted receipt age for TIME proofs (travel time)
+}
+
 export interface KeyDef {
   secret: string; // raw TOTP secret; never leaves the manager's browser unsealed
   digits: number; // 4..10, default 6
   decoy?: number; // index of this key's decoy twin in keys[]
   display?: KeyDisplay;
+  chain?: KeyChain;
+}
+
+export function defaultChain(): KeyChain {
+  const raw = crypto.getRandomValues(new Uint8Array(20));
+  return {
+    secret: Array.from(raw, (b) => String.fromCharCode(33 + (b % 94))).join(""),
+    digits: 6,
+    mode: "sequence",
+    action: "lock",
+    min_elapsed_s: 1800,
+    max_age_s: 3600,
+  };
 }
 
 export type Policy =
@@ -68,6 +93,12 @@ export interface SlotDef {
   reset_on_invalid: boolean;
   negative: NegativeAction;
   gates: SlotGates;
+  /** Veto window: 0 = fire immediately; >0 = arm, fire after this many
+   *  seconds unless a valid code from veto_key cancels. */
+  veto_delay_s?: number;
+  veto_key?: number;
+  /** 0/undefined = unlimited; otherwise the slot dies after N fires. */
+  budget?: number;
 }
 
 /** A geofence. Gates reference zones by index; `name` is for humans.
@@ -162,6 +193,11 @@ export function configFeatures(cfg: DeviceConfig): string[] {
     }
     if (s.gates.fence !== undefined) f.add("zones");
     if (s.gates.calendar !== undefined) f.add("calendars");
+    if ((s.veto_delay_s ?? 0) > 0) f.add("veto");
+    if ((s.budget ?? 0) > 0) f.add("budget");
+  }
+  for (const k of cfg.keys) {
+    if (k.chain) f.add("chain");
   }
   return [...f].sort();
 }
