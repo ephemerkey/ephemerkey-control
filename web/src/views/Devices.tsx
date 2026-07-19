@@ -44,9 +44,34 @@ export default function Devices() {
     /* source JSON broken elsewhere — surfaced on Backup page */
   }
   const authIds = Object.keys(authenticators);
+
+  async function publish() {
+    setNote({ kind: "ok", text: "publishing…" });
+    try {
+      const r = await pool.publishAll();
+      const parts = [`${r.published} device(s) sealed & delivered to the server`];
+      if (r.skipped) parts.push(`${r.skipped} without a config skipped`);
+      if (r.errors.length) parts.push(`${r.errors.length} failed`);
+      setNote({ kind: r.errors.length ? "err" : "ok", text: parts.join("; ") });
+    } catch (e) {
+      setNote({ kind: "err", text: `publish failed: ${e}` });
+    }
+  }
+
   return (
     <section>
-      <h2 data-testid="roster-count">Devices — {devices.length} device(s)</h2>
+      <div className="row">
+        <h2 data-testid="roster-count">Devices — {devices.length} device(s)</h2>
+        {devices.length > 0 && (
+          <button className="primary" data-testid="publish-btn" onClick={publish}>
+            Publish all
+          </button>
+        )}
+      </div>
+      <p className="hint">
+        Publish seals every device&apos;s current config, uploads the sealed artifacts to the server
+        (couriers and ESP32 devices fetch them from there), and backs up your sealed source doc.
+      </p>
       {devices.length === 0 ? (
         <div className="card" data-testid="roster-empty">
           <p>

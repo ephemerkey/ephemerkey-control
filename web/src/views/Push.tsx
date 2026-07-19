@@ -86,6 +86,7 @@ export default function Push() {
 
   return (
     <section>
+      <p className="crumbs"><a href="/">← landing</a></p>
       <h2>Push update</h2>
       <p>
         Plug in an ephemerkey and hold its provisioning button while connecting. You&apos;ll ferry an

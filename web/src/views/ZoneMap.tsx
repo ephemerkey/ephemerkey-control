@@ -30,9 +30,13 @@ export default function ZoneMap({
   const circleRef = useRef<L.Circle | null>(null);
   const dotRef = useRef<L.CircleMarker | null>(null);
   const zoneRef = useRef(zone);
-  zoneRef.current = zone;
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+  // Keep the click handler (registered once) reading the latest props
+  // without re-registering — updated after render, not during it.
+  useEffect(() => {
+    zoneRef.current = zone;
+    onChangeRef.current = onChange;
+  });
 
   useEffect(() => {
     if (!divRef.current || mapRef.current) return;

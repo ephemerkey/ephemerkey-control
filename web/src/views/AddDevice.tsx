@@ -42,7 +42,7 @@ export default function AddDevice() {
     doc.authenticators[id] = { name: authName || "authenticator", keys: [defaultSoftKey()] };
     pool.setSource(JSON.stringify(doc, null, 2));
     setAuthName("");
-    navigate(`/authenticator/${id}`);
+    void navigate(`/authenticator/${id}`);
   }
 
   async function enroll(fields: { device_id: string; sign_pub: string; kx_pub: string }, stay = false) {
@@ -56,7 +56,7 @@ export default function AddDevice() {
       name: devName || null,
     });
     await pool.refreshRoster();
-    if (!stay) navigate(`/device/${id}`);
+    if (!stay) void navigate(`/device/${id}`);
     return id;
   }
 

@@ -12,6 +12,7 @@ import { usePool } from "../state";
 export default function Backup() {
   const pool = usePool();
   const [backupPass, setBackupPass] = useState("");
+  const [lockPass, setLockPass] = useState("");
   const [noteBackup, setNoteBackup] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [noteSource, setNoteSource] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const key = pool.key!;
@@ -73,12 +74,69 @@ export default function Backup() {
             Forget key on this browser
           </button>
         </div>
+        <div className="row">
+          <input
+            data-testid="pool-name"
+            placeholder="pool name (this browser)"
+            defaultValue={pool.pools.find((p) => p.setId === pool.setId)?.name ?? ""}
+            onBlur={(e) => pool.renameActive(e.target.value)}
+          />
+          <span className="hint">a label for the switcher</span>
+        </div>
         <details className="advanced">
           <summary>public key</summary>
           <p>
             <strong>owner_pub</strong> <code>{bytesToHex(key.pub)}</code>
           </p>
         </details>
+      </div>
+
+      <div className="card">
+        <h3>Browser lock {pool.activeEncrypted ? "🔒" : ""}</h3>
+        <p>
+          Encrypt this pool&apos;s key in this browser under a passphrase (Argon2id → XChaCha20).
+          You&apos;ll be asked for it each time the app loads. Protects a shared or stolen machine —
+          without it the key sits in local storage in the clear.
+        </p>
+        {pool.activeEncrypted ? (
+          <div className="row">
+            <span className="inline-status ok">this pool is passphrase-protected in this browser</span>
+            <button
+              data-testid="lock-clear"
+              className="danger"
+              onClick={() => {
+                pool.clearBrowserPassphrase();
+                setNoteBackup({ kind: "ok", text: "browser passphrase removed" });
+              }}
+            >
+              Remove passphrase
+            </button>
+          </div>
+        ) : (
+          <div className="row">
+            <input
+              data-testid="lock-pass"
+              type="password"
+              placeholder="passphrase (min 8 chars)"
+              value={lockPass}
+              onChange={(e) => setLockPass(e.target.value)}
+            />
+            <button
+              data-testid="lock-set"
+              onClick={() => {
+                if (lockPass.length < 8) {
+                  setNoteBackup({ kind: "err", text: "passphrase must be at least 8 characters" });
+                  return;
+                }
+                pool.setBrowserPassphrase(lockPass);
+                setLockPass("");
+                setNoteBackup({ kind: "ok", text: "browser locked — you'll need this passphrase on next load" });
+              }}
+            >
+              Lock this browser
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="card">

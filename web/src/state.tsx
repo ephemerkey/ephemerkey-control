@@ -6,8 +6,24 @@
 import { createContext, ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils";
 import { CTX_REGISTER, getSourceBlob, putSourceBlob, signedGet, signedPost } from "./lib/api";
-import { deriveKx, sealToKx, unsealWithSeed } from "./lib/backup";
-import { forgetOwnerKey, loadOwnerKey, OwnerKey, saveOwnerKey, setIdFromPub } from "./lib/keys";
+import { deriveKx, sealToKx, unsealWithSeed, unwrapKeyfile, wrapKeyfile } from "./lib/backup";
+import {
+  activeSetId,
+  addPoolEncrypted,
+  addPoolPlain,
+  exportKeyFile,
+  importKeyFile,
+  isEncrypted,
+  listPools,
+  OwnerKey,
+  poolState,
+  PoolSummary,
+  removePool,
+  renamePool,
+  setActive,
+  setIdFromPub,
+  wrappedFor,
+} from "./lib/keys";
 import { seal, sign1 } from "./lib/cose";
 import { configFeatures } from "./lib/config";
 
@@ -22,9 +38,19 @@ export type SaveState = "idle" | "saving" | "saved" | "error";
 interface Pool {
   key: OwnerKey | null;
   setId: string | null;
-  adopt: (k: OwnerKey) => void;
+  /** True when the active pool is passphrase-wrapped and not yet unlocked. */
+  locked: boolean;
+  lockedSetId: string | null;
+  unlock: (passphrase: string) => Promise<void>;
+  pools: PoolSummary[];
+  switchPool: (setId: string) => void;
+  activeEncrypted: boolean;
+  setBrowserPassphrase: (passphrase: string) => void;
+  clearBrowserPassphrase: () => void;
+  renameActive: (name: string) => void;
+  adopt: (k: OwnerKey, name?: string) => void;
   forget: () => void;
-  roster: any | null;
+  roster: any;
   rosterError: string | null;
   refreshRoster: () => Promise<void>;
   source: string;
@@ -33,6 +59,7 @@ interface Pool {
   saveNow: () => Promise<void>;
   recoverSource: () => Promise<void>;
   pushDevice: (d: any) => Promise<string>;
+  publishAll: () => Promise<{ published: number; skipped: number; errors: string[] }>;
 }
 
 const PoolCtx = createContext<Pool | null>(null);
@@ -44,19 +71,75 @@ export function usePool(): Pool {
 }
 
 export function PoolProvider({ children }: { children: ReactNode }) {
-  const [key, setKey] = useState<OwnerKey | null>(() => loadOwnerKey());
-  const [roster, setRoster] = useState<any | null>(null);
+  const initial = poolState();
+  const [key, setKey] = useState<OwnerKey | null>(initial.kind === "plain" ? initial.key : null);
+  const [locked, setLocked] = useState(initial.kind === "locked");
+  const [lockedSetId, setLockedSetId] = useState<string | null>(
+    initial.kind === "locked" ? initial.setId : null,
+  );
+  const [pools, setPools] = useState<PoolSummary[]>(() => listPools());
+  const [roster, setRoster] = useState<any>(null);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [source, setSourceState] = useState(SOURCE_TEMPLATE);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const lastSaved = useRef<string | null>(null);
   const sourceRef = useRef(source);
-  sourceRef.current = source;
+  useEffect(() => {
+    sourceRef.current = source;
+  });
 
   const setId = key ? setIdFromPub(key.pub) : null;
+  const refreshPools = () => setPools(listPools());
 
   function setSource(s: string) {
     setSourceState(s);
+  }
+
+  function switchPool(target: string) {
+    setActive(target);
+    const st = poolState(target);
+    if (st.kind === "plain") {
+      setLocked(false);
+      setLockedSetId(null);
+      setKey(st.key);
+    } else if (st.kind === "locked") {
+      setKey(null);
+      setLocked(true);
+      setLockedSetId(st.setId);
+    }
+    refreshPools();
+  }
+
+  async function unlock(passphrase: string) {
+    const id = lockedSetId ?? activeSetId();
+    if (!id) throw new Error("no locked pool");
+    const wrapped = wrappedFor(id);
+    if (!wrapped) throw new Error("pool is not passphrase-protected");
+    const restored = importKeyFile(unwrapKeyfile(wrapped, passphrase));
+    if (setIdFromPub(restored.pub) !== id) throw new Error("unlocked key does not match this pool");
+    setLocked(false);
+    setLockedSetId(null);
+    setKey(restored);
+  }
+
+  function setBrowserPassphrase(passphrase: string) {
+    if (!key) return;
+    const wrapped = wrapKeyfile(exportKeyFile(key), passphrase);
+    addPoolEncrypted(key, wrapped);
+    refreshPools();
+  }
+
+  function clearBrowserPassphrase() {
+    if (!key) return;
+    addPoolPlain(key);
+    refreshPools();
+  }
+
+  function renameActive(name: string) {
+    if (setId) {
+      renamePool(setId, name);
+      refreshPools();
+    }
   }
 
   async function ensureRegistered(k: OwnerKey) {
@@ -158,14 +241,23 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, setId]);
 
-  function adopt(k: OwnerKey) {
-    saveOwnerKey(k);
+  function adopt(k: OwnerKey, name?: string) {
+    addPoolPlain(k, name);
+    setLocked(false);
+    setLockedSetId(null);
     setKey(k);
+    refreshPools();
   }
 
+  /** Remove the active pool from this browser and switch to another (or none). */
   function forget() {
-    forgetOwnerKey();
+    if (!setId && !lockedSetId) return;
+    const next = removePool(setId ?? lockedSetId!);
     setKey(null);
+    setLocked(false);
+    setLockedSetId(null);
+    refreshPools();
+    if (next) switchPool(next);
   }
 
   /** Sign1(config, owner-kid) sealed to the device, uploaded at next seq. */
@@ -191,9 +283,44 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     return `config seq ${seq} sealed & pushed`;
   }
 
+  /** Publish: seal every enrolled device that has a config in the source
+   *  doc, upload the artifacts (bumping seq), and back the sealed source up.
+   *  The deploy button — one action to get everything onto the server. */
+  async function publishAll(): Promise<{ published: number; skipped: number; errors: string[] }> {
+    if (!key || !setId) throw new Error("no key");
+    await saveNow(); // sealed source backup first — always
+    const doc = JSON.parse(sourceRef.current);
+    const errors: string[] = [];
+    let published = 0;
+    let skipped = 0;
+    for (const d of roster?.devices ?? []) {
+      if (!doc.devices?.[d.device_id]) {
+        skipped++;
+        continue;
+      }
+      try {
+        await pushDevice(d);
+        published++;
+      } catch (e) {
+        errors.push(`${d.device_id.slice(0, 12)}: ${e}`);
+      }
+    }
+    await refreshRoster();
+    return { published, skipped, errors };
+  }
+
   const pool: Pool = {
     key,
     setId,
+    locked,
+    lockedSetId,
+    unlock,
+    pools,
+    switchPool,
+    activeEncrypted: setId ? isEncrypted(setId) : false,
+    setBrowserPassphrase,
+    clearBrowserPassphrase,
+    renameActive,
     adopt,
     forget,
     roster,
@@ -205,6 +332,7 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     saveNow,
     recoverSource,
     pushDevice,
+    publishAll,
   };
   return <PoolCtx.Provider value={pool}>{children}</PoolCtx.Provider>;
 }

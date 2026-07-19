@@ -2,21 +2,30 @@
 // UI requires the owner key, so this is the only screen without it.
 
 import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { generateOwnerKey, importKeyFile } from "../lib/keys";
 import { getKeywrapBlob } from "../lib/api";
 import { unwrapKeyfile } from "../lib/backup";
 import { setIdFromPub } from "../lib/keys";
 import { usePool } from "../state";
 
-export default function Welcome() {
+// `manage` = reached from an active session ("add / manage pools"); it lists
+// existing pools and lets you switch, and adopting a pool returns you to it.
+export default function Welcome({ manage = false }: { manage?: boolean }) {
   const pool = usePool();
+  const navigate = useNavigate();
   const [restoreSetId, setRestoreSetId] = useState("");
   const [restorePass, setRestorePass] = useState("");
   const [note, setNote] = useState<{ id: string; kind: "ok" | "err"; text: string } | null>(null);
 
+  const done = () => {
+    if (manage) void navigate("/devices");
+  };
+
   async function importFile(file: File) {
     try {
       pool.adopt(importKeyFile(await file.text()));
+      done();
     } catch (e) {
       setNote({ id: "key", kind: "err", text: `import failed: ${e}` });
     }
@@ -32,6 +41,7 @@ export default function Welcome() {
       }
       setRestorePass("");
       pool.adopt(restored);
+      done();
     } catch (e) {
       setNote({ id: "restore", kind: "err", text: `restore failed: ${e}` });
     }
@@ -39,16 +49,49 @@ export default function Welcome() {
 
   return (
     <section className="welcome">
-      <h2>ephemerkey control</h2>
+      <h2>{manage ? "Pools" : "ephemerkey control"}</h2>
       <p className="stephint">
         A pool of ephemerkey devices is owned by one key. There are no accounts: holding the key is
-        what makes you a manager, and sharing its keyfile is how you share the pool.
+        what makes you a manager, and sharing its keyfile is how you share the pool. This browser can
+        hold several pools and switch between them.
       </p>
 
+      {manage && pool.pools.length > 0 && (
+        <div className="card">
+          <h3>Your pools</h3>
+          {pool.pools.map((p) => (
+            <div key={p.setId} className="row">
+              <button
+                data-testid={`pool-open-${p.setId}`}
+                className={p.setId === pool.setId ? "primary" : ""}
+                onClick={() => {
+                  pool.switchPool(p.setId);
+                  void navigate("/devices");
+                }}
+              >
+                {p.encrypted ? "🔒 " : ""}
+                {p.name || p.setId}
+              </button>
+              {p.setId === pool.setId && <span className="hint">active</span>}
+            </div>
+          ))}
+          <p className="crumbs">
+            <Link to="/devices">← back</Link>
+          </p>
+        </div>
+      )}
+
       <div className="card">
-        <h3>Start a new pool</h3>
+        <h3>{manage ? "Add another pool" : "Start a new pool"}</h3>
         <p>Generates a fresh owner key in this browser and registers its set.</p>
-        <button className="primary" data-testid="owner-generate" onClick={() => pool.adopt(generateOwnerKey())}>
+        <button
+          className="primary"
+          data-testid="owner-generate"
+          onClick={() => {
+            pool.adopt(generateOwnerKey());
+            done();
+          }}
+        >
           Create pool
         </button>
         {note?.id === "key" && <p className={`inline-status ${note.kind}`}>{note.text}</p>}

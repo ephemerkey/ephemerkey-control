@@ -26,7 +26,7 @@ async function openSourceText(page: any) {
 }
 
 test("create pool: everything loads itself", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("owner-generate").click();
 
   // Landed on Devices with the set registered and roster loaded — no
@@ -38,7 +38,7 @@ test("create pool: everything loads itself", async ({ page }) => {
 });
 
 test("export keyfile, forget, import restores the same set", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("owner-generate").click();
   const freshSetId = (await page.getByTestId("set-id").innerText()).trim();
 
@@ -60,7 +60,7 @@ test("export keyfile, forget, import restores the same set", async ({ page }) =>
 });
 
 test("store passphrase backup and sealed config source", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("owner-generate").click();
   setId = (await page.getByTestId("set-id").innerText()).trim();
 
@@ -83,7 +83,7 @@ test("store passphrase backup and sealed config source", async ({ page }) => {
 });
 
 test("fresh browser recovers key via set_id + passphrase, then the source", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/devices");
   await expect(page.getByTestId("owner-generate")).toBeVisible(); // truly fresh
 
   await page.getByTestId("restore-setid").fill(setId);
@@ -98,7 +98,7 @@ test("fresh browser recovers key via set_id + passphrase, then the source", asyn
 });
 
 test("wrong passphrase is rejected inline", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("restore-setid").fill(setId);
   await page.getByTestId("restore-pass").fill("not-the-passphrase");
   await page.getByTestId("restore-btn").click();
@@ -109,7 +109,7 @@ test("wrong passphrase is rejected inline", async ({ page }) => {
 });
 
 test("a different key is a different set with no stored source", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("owner-generate").click();
   const otherSetId = (await page.getByTestId("set-id").innerText()).trim();
   expect(otherSetId).not.toBe(setId);
@@ -126,7 +126,7 @@ test("manual enroll (advanced) lands on the device page; push works", async ({ p
   const signPub = bytesToHex(ed25519.getPublicKey(ed25519.utils.randomPrivateKey()));
   const kxPub = bytesToHex(x25519.getPublicKey(crypto.getRandomValues(new Uint8Array(32))));
 
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("owner-import").setInputFiles({
     name: "owner.json",
     mimeType: "application/json",
@@ -156,7 +156,7 @@ test("manual enroll (advanced) lands on the device page; push works", async ({ p
 
 test("mock device auto-registers a never-registered set", async ({ page }) => {
   // Regression: fresh key, no explicit registration, straight to mock.
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("owner-generate").click();
   await page.getByTestId("nav-add").click();
   const downloadPromise = page.waitForEvent("download");
@@ -171,7 +171,7 @@ test("mock device auto-registers a never-registered set", async ({ page }) => {
 });
 
 test("policy workflow on a mock device round-trips every family", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("owner-import").setInputFiles({
     name: "owner.json",
     mimeType: "application/json",
@@ -322,7 +322,7 @@ test("policy workflow on a mock device round-trips every family", async ({ page 
 });
 
 test("non-ephemerkey generator: authenticator with a linked QR key", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("owner-import").setInputFiles({
     name: "owner.json",
     mimeType: "application/json",
@@ -366,7 +366,7 @@ test("non-ephemerkey generator: authenticator with a linked QR key", async ({ pa
 });
 
 test("config linter flags two rituals sharing a key (unreachable ritual)", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("owner-import").setInputFiles({
     name: "owner.json",
     mimeType: "application/json",
@@ -395,7 +395,7 @@ test("config linter flags two rituals sharing a key (unreachable ritual)", async
 });
 
 test("keyfile import from another browser recovers the pool + configs", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/devices");
   await page.getByTestId("owner-import").setInputFiles({
     name: "owner.json",
     mimeType: "application/json",
@@ -417,4 +417,61 @@ test("keyfile import from another browser recovers the pool + configs", async ({
       }
     })
     .toBe("has-config");
+});
+
+test("landing chooses between manage and program flows", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("landing-manage")).toBeVisible();
+  await expect(page.getByTestId("landing-program")).toBeVisible();
+  await page.getByTestId("landing-program").click();
+  await expect(page).toHaveURL(/\/push$/);
+  await page.goto("/");
+  await page.getByTestId("landing-manage").click();
+  await expect(page.getByTestId("owner-generate")).toBeVisible();
+});
+
+test("browser passphrase locks the pool and unlock restores it", async ({ page }) => {
+  await page.goto("/devices");
+  await page.getByTestId("owner-generate").click();
+  const id = (await page.getByTestId("set-id").innerText()).trim();
+
+  await page.getByTestId("nav-backup").click();
+  await page.getByTestId("lock-pass").fill("stronglockpass");
+  await page.getByTestId("lock-set").click();
+  await expect(page.getByTestId("status-backup")).toContainText("browser locked");
+
+  await page.reload();
+  await expect(page.getByTestId("unlock-pass")).toBeVisible();
+  await page.getByTestId("unlock-pass").fill("wrongpass");
+  await page.getByTestId("unlock-btn").click();
+  await expect(page.getByTestId("unlock-err")).toContainText("wrong passphrase", { timeout: 30_000 });
+  await page.getByTestId("unlock-pass").fill("stronglockpass");
+  await page.getByTestId("unlock-btn").click();
+  await expect(page.getByTestId("set-id")).toHaveText(id, { timeout: 30_000 });
+});
+
+test("two pools coexist and the switcher moves between them", async ({ page }) => {
+  await page.goto("/devices");
+  await page.getByTestId("owner-generate").click();
+  const first = (await page.getByTestId("set-id").innerText()).trim();
+  await page.getByTestId("nav-pools").click();
+  await page.getByTestId("owner-generate").click();
+  const second = (await page.getByTestId("set-id").innerText()).trim();
+  expect(second).not.toBe(first);
+  await expect(page.getByTestId("pool-switcher")).toBeVisible();
+  await page.getByTestId("pool-switcher").selectOption(first);
+  await expect(page.getByTestId("set-id")).toHaveText(first);
+});
+
+test("publish seals every configured device and uploads", async ({ page }) => {
+  await page.goto("/devices");
+  await page.getByTestId("owner-import").setInputFiles({
+    name: "owner.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(keyfile),
+  });
+  await expect(page.getByTestId("set-id")).toHaveText(setId);
+  await expect(page.getByTestId("roster-count")).toContainText("device(s)");
+  await page.getByTestId("publish-btn").click();
+  await expect(page.getByTestId("status-roster")).toContainText("sealed & delivered", { timeout: 20_000 });
 });

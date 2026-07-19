@@ -97,7 +97,7 @@ export class FrameParser {
       const body = this.buf.slice(2, 6 + len);
       const gotCrc = this.buf[total - 2] | (this.buf[total - 1] << 8);
       if (crc16(body) === gotCrc) {
-        frames.push({ type: this.buf[3] as FrameType, payload: this.buf.slice(6, 6 + len) });
+        frames.push({ type: this.buf[3], payload: this.buf.slice(6, 6 + len) });
         this.buf = this.buf.slice(total);
       } else {
         this.buf = this.buf.slice(2); // corrupt; resync
