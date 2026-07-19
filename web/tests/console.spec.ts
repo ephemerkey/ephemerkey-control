@@ -160,6 +160,66 @@ test("enroll a device and seal+push a config from the console", async ({ page })
   await expect(page.locator("tbody tr")).toContainText("seq 1 pending");
 });
 
+test("policy editor round-trips every policy family into the source doc", async ({ page }) => {
+  const devId = "a1b2c3d4e5f60718293a4b5c";
+  await page.goto("/");
+  await page.getByTestId("owner-generate").click();
+
+  // Create a fresh config for a device and open the editor.
+  await page.getByTestId("edit-device-new").fill(devId);
+  await page.getByTestId("edit-device-create").click();
+  await expect(page.getByTestId("cfg-role")).toBeVisible();
+
+  // Two keys; second is a scatter/show-once decoy twin of the first.
+  await page.getByTestId("cfg-add-key").click();
+  await page.getByTestId("key-0-decoy").selectOption("1");
+  await page.getByTestId("key-1-display").selectOption("custom");
+  await page.getByTestId("key-1-mode").selectOption("scatter");
+  await page.getByTestId("key-1-once").selectOption("refuse");
+
+  // Slot 0: quorum of 2 over both keys, duress action, 120 s lockout.
+  await page.getByTestId("slot-0-action").selectOption("duress");
+  await page.getByTestId("slot-0-policy-type").selectOption("quorum");
+  await page.getByTestId("slot-0-quorum-m").fill("2");
+  await page.getByTestId("slot-0-quorum-keys").fill("0,1");
+  await page.getByTestId("slot-0-negative").selectOption("lockout");
+  await page.getByTestId("slot-0-lockout").fill("120");
+
+  // Slot 1: sequence with paced gaps; slot 2: deadman; slot 3: path.
+  await page.getByTestId("cfg-add-slot").click();
+  await page.getByTestId("slot-1-policy-type").selectOption("sequence");
+  await page.getByTestId("slot-1-seq-n").fill("4");
+  await page.getByTestId("slot-1-seq-window").fill("900");
+  await page.getByTestId("cfg-add-slot").click();
+  await page.getByTestId("slot-2-policy-type").selectOption("deadman");
+  await page.getByTestId("slot-2-deadman-beat").fill("7200");
+  await page.getByTestId("cfg-add-slot").click();
+  await page.getByTestId("slot-3-policy-type").selectOption("path");
+  await page.getByTestId("slot-3-path-legs").fill("1,0");
+  await page.getByTestId("slot-3-fence").fill("0");
+
+  // Everything must have landed in the source doc as emulator-exact JSON.
+  const doc = JSON.parse(await page.getByTestId("source-text").inputValue());
+  const cfg = doc.devices[devId];
+  expect(cfg.keys).toHaveLength(2);
+  expect(cfg.keys[0].decoy).toBe(1);
+  expect(cfg.keys[1].display).toMatchObject({ mode: "scatter", once: "refuse" });
+  expect(cfg.slots[0]).toMatchObject({
+    action: "duress",
+    negative: "lockout:120",
+    policy: { type: "quorum", m: 2, keys: [0, 1], window_s: 600, alternating: false },
+  });
+  expect(cfg.slots[1].policy).toMatchObject({ type: "sequence", n: 4, window_s: 900, gap_min_s: 60 });
+  expect(cfg.slots[2].policy).toMatchObject({ type: "deadman", beat_s: 7200 });
+  expect(cfg.slots[3].policy).toMatchObject({ type: "path", leg_keys: [1, 0], leg_deadline_s: 900 });
+  expect(cfg.slots[3].gates.fence).toBe(0);
+
+  // And the mapping is bidirectional: hand-editing the JSON updates the form.
+  doc.devices[devId].slots[2].policy.beat_s = 60;
+  await page.getByTestId("source-text").fill(JSON.stringify(doc, null, 2));
+  await expect(page.getByTestId("slot-2-deadman-beat")).toHaveValue("60");
+});
+
 test("keyfile import from another browser recovers the pool too", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("owner-import").setInputFiles({

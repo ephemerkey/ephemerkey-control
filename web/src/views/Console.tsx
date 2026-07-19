@@ -26,6 +26,8 @@ import {
   signedPost,
 } from "../lib/api";
 import { deriveKx, sealToKx, unsealWithSeed, unwrapKeyfile, wrapKeyfile } from "../lib/backup";
+import { defaultDeviceConfig, DeviceConfig } from "../lib/config";
+import ConfigEditor from "./ConfigEditor";
 
 const SOURCE_TEMPLATE = JSON.stringify(
   { format: "ekctl-source-v1", devices: {}, notes: "" },
@@ -42,6 +44,36 @@ export default function Console() {
   const [restorePass, setRestorePass] = useState("");
   const [source, setSource] = useState(SOURCE_TEMPLATE);
   const [devForm, setDevForm] = useState({ device_id: "", sign_pub: "", kx_pub: "", role: 2, name: "" });
+  const [editDevice, setEditDevice] = useState("");
+  const [newCfgId, setNewCfgId] = useState("");
+
+  // The source doc (JSON string) is the single source of truth; the
+  // structured editor reads/writes one device's entry inside it.
+  let parsedSource: any = null;
+  try {
+    parsedSource = JSON.parse(source);
+  } catch {
+    /* editor hidden while the JSON is invalid */
+  }
+  const sourceDeviceIds: string[] = parsedSource?.devices ? Object.keys(parsedSource.devices) : [];
+  const editingCfg: DeviceConfig | null =
+    editDevice && parsedSource?.devices?.[editDevice] ? parsedSource.devices[editDevice] : null;
+
+  function updateEditingCfg(cfg: DeviceConfig) {
+    const p = JSON.parse(source);
+    p.devices[editDevice] = cfg;
+    setSource(JSON.stringify(p, null, 2));
+  }
+
+  function createDeviceCfg() {
+    const id = newCfgId.trim().toLowerCase();
+    if (!id || !parsedSource) return;
+    const p = { format: "ekctl-source-v1", devices: {}, ...parsedSource };
+    p.devices[id] = defaultDeviceConfig(2);
+    setSource(JSON.stringify(p, null, 2));
+    setEditDevice(id);
+    setNewCfgId("");
+  }
 
   const setId = key ? setIdFromPub(key.pub) : null;
 
@@ -349,6 +381,34 @@ export default function Console() {
                 Recover from server
               </button>
             </div>
+            <hr />
+            <h4>Policy editor</h4>
+            <label className="field">
+              edit device
+              <select
+                data-testid="edit-device"
+                value={editDevice}
+                onChange={(e) => setEditDevice(e.target.value)}
+              >
+                <option value="">—</option>
+                {sourceDeviceIds.map((id) => (
+                  <option key={id} value={id}>
+                    {id.slice(0, 16)}
+                  </option>
+                ))}
+              </select>
+            </label>{" "}
+            <input
+              data-testid="edit-device-new"
+              placeholder="device_id for a new config"
+              value={newCfgId}
+              onChange={(e) => setNewCfgId(e.target.value)}
+            />{" "}
+            <button data-testid="edit-device-create" onClick={createDeviceCfg} disabled={!parsedSource}>
+              New config
+            </button>
+            {!parsedSource && <p className="status">source doc JSON is invalid — fix it to use the editor</p>}
+            {editingCfg && <ConfigEditor cfg={editingCfg} onChange={updateEditingCfg} />}
           </div>
         </>
       )}
