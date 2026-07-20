@@ -188,6 +188,28 @@ try {
   const goodResp = await pushBlob(critGood, 2);
   check("known critical features accepted", goodResp.type === FT.CONFIG_ACK, `type=0x${goodResp.type.toString(16)}`);
 
+  // A FULLY-POPULATED policy config must parse end-to-end: the JS structured
+  // encoder ↔ the Rust ephemerkey-config decoder the device runs. Exercises
+  // keys, a sequence policy, gates, and negative-action encoding.
+  const fullCfg = configToCbor({
+    role: 2,
+    keys: [{ secret: "SEQVAULTKEY", digits: 6, decoy: undefined }],
+    slots: [
+      {
+        key: 0,
+        action: "unlock",
+        progress: true,
+        reset_on_invalid: true,
+        negative: "lockout:300",
+        gates: { stillness_s: 0 },
+        policy: { type: "sequence", n: 2, window_s: 600, gap_min_s: 30, gap_max_s: 90, delay_min_s: 0, delay_max_s: 120, jitter_s: 5 },
+      },
+    ],
+    crit: ["seq-jitter"],
+  });
+  const fullResp = await pushBlob(seal(sign1(fullCfg, ownerPub, ownerPriv), devKxPub, 3, fields[1]), 3);
+  check("full policy config parses on device", fullResp.type === FT.CONFIG_ACK, `type=0x${fullResp.type?.toString(16)} code=${fullResp.payload?.[0]}`);
+
   // Pull the device's signed event log and relay it to the server.
   const evFrame = await chan.request(FT.EVENTS_REQ, Uint8Array.of(0, 0, 0, 0));
   check("events frame", evFrame.type === FT.EVENTS);

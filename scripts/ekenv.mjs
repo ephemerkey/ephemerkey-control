@@ -29,40 +29,102 @@ export const cArr = (...items) => concatBytes(cborHead(4, items.length), ...item
 export const cMap = (...pairs) => concatBytes(cborHead(5, pairs.length / 2), ...pairs);
 
 // Device config as pinned integer-keyed CBOR (mirror of web/src/lib/cose.ts
-// configToCbor; the firmware's ephemerkey-envelope::config is the decoder).
-// Top level: 1=role, 2=staleness_s, 3=zones [[lat_e7,lon_e7,radius_m]],
-// 4=keys, 5=slots, 6=calendars, 7=confirm, 8=crit [tstr].
+// configToCbor; ephemerkey-config is the Rust decoder). Every policy
+// sub-document is integer-keyed; action 0 unlock/1 lock/2 duress, mode
+// 0 sequence/1 time/2 both. Calendars (key 6) are reserved.
 const E7 = 10_000_000;
-export function cValue(v) {
-  if (typeof v === "boolean") return Uint8Array.of(v ? 0xf5 : 0xf4);
-  if (v === null || v === undefined) return Uint8Array.of(0xf6);
-  if (typeof v === "number") {
-    if (!Number.isInteger(v)) throw new Error(`cbor: non-integer ${v}`);
-    return cInt(v);
-  }
-  if (typeof v === "string") return cTstr(v);
-  if (Array.isArray(v)) return cArr(...v.map(cValue));
-  if (typeof v === "object") {
-    const pairs = [];
-    for (const [k, val] of Object.entries(v)) {
-      if (val === undefined) continue;
-      pairs.push(cTstr(k), cValue(val));
-    }
-    return cMap(...pairs);
-  }
-  throw new Error(`cbor: unsupported ${typeof v}`);
+const ACTION = { unlock: 0, lock: 1, duress: 2 };
+const RMODE = { sequence: 0, time: 1, both: 2 };
+const cBool = (b) => Uint8Array.of(b ? 0xf5 : 0xf4);
+const secretB = (s) => cBstr(utf8ToBytes(s));
+function imap(entries) {
+  const flat = [];
+  for (const [k, v] of entries) if (v !== undefined) flat.push(cUint(k), v);
+  return cMap(...flat);
 }
 const zoneCbor = (z) => cArr(cInt(Math.round(z.lat * E7)), cInt(Math.round(z.lon * E7)), cUint(z.radius_m));
+const displayCbor = (d) =>
+  imap([
+    [1, cUint(d.mode === "scatter" ? 1 : 0)],
+    [2, cUint(d.dwell_ms ?? 800)],
+    [3, cUint(d.reveal_s ?? 5)],
+    [4, cUint(d.once === "refuse" ? 1 : d.once === "decoy" ? 2 : 0)],
+    [5, cUint(d.gap_min_s ?? 0)],
+  ]);
+const chainCbor = (c) =>
+  imap([
+    [1, secretB(c.secret)],
+    [2, cUint(c.digits ?? 6)],
+    [3, cUint(RMODE[c.mode] ?? 0)],
+    [4, cUint(ACTION[c.action] ?? 1)],
+    [5, cUint(c.min_elapsed_s ?? 0)],
+    [6, cUint(c.max_age_s ?? 3600)],
+  ]);
+const keyCbor = (k) =>
+  imap([
+    [1, secretB(k.secret)],
+    [2, cUint(k.digits ?? 6)],
+    [3, k.decoy !== undefined ? cUint(k.decoy) : undefined],
+    [4, k.display ? displayCbor(k.display) : undefined],
+    [5, k.chain ? chainCbor(k.chain) : undefined],
+  ]);
+function policyCbor(p) {
+  switch (p.type) {
+    case "sequence":
+      return imap([
+        [1, cUint(1)], [2, cUint(p.n)], [3, cUint(p.window_s)], [4, cUint(p.gap_min_s)],
+        [5, cUint(p.gap_max_s)], [6, cUint(p.delay_min_s)], [7, cUint(p.delay_max_s)], [8, cUint(p.jitter_s ?? 0)],
+      ]);
+    case "path":
+      return imap([
+        [1, cUint(2)], [2, cArr(...p.leg_keys.map((k) => cUint(k)))], [3, cUint(p.leg_deadline_s)], [4, cUint(p.delay_max_s)],
+      ]);
+    case "deadman":
+      return imap([[1, cUint(3)], [2, cUint(p.beat_s)]]);
+    case "quorum":
+      return imap([
+        [1, cUint(4)], [2, cUint(p.m)], [3, cArr(...p.keys.map((k) => cUint(k)))], [4, cUint(p.window_s)],
+        [5, cBool(!!p.alternating)], [6, cUint(p.gap_min_s)], [7, cUint(p.gap_max_s)],
+      ]);
+    default:
+      return imap([[1, cUint(0)]]);
+  }
+}
+const gatesCbor = (g) =>
+  imap([
+    [1, g.fence !== undefined ? cUint(g.fence) : undefined],
+    [2, cUint(g.stillness_s ?? 0)],
+    [3, g.calendar !== undefined ? cUint(g.calendar) : undefined],
+  ]);
+function negativeCbor(neg) {
+  if (neg === "silent") return cArr(cUint(1));
+  const m = /^lockout:(\d+)$/.exec(neg ?? "");
+  if (m) return cArr(cUint(2), cUint(parseInt(m[1], 10)));
+  return cArr(cUint(0));
+}
+const slotCbor = (s) =>
+  imap([
+    [1, cUint(s.key)],
+    [2, cUint(ACTION[s.action] ?? 0)],
+    [3, policyCbor(s.policy)],
+    [4, cBool(!!s.progress)],
+    [5, cBool(s.reset_on_invalid !== false)],
+    [6, negativeCbor(s.negative ?? "reset")],
+    [7, gatesCbor(s.gates ?? { stillness_s: 0 })],
+    [8, cUint(s.veto_delay_s ?? 0)],
+    [9, s.veto_key !== undefined ? cUint(s.veto_key) : undefined],
+    [10, cUint(s.budget ?? 0)],
+  ]);
+const confirmCbor = (c) => imap([[1, secretB(c.secret)], [2, cUint(c.digits ?? 6)], [3, cUint(RMODE[c.mode] ?? 0)]]);
 export function configToCbor(cfg) {
   const pairs = [];
   const put = (k, v) => pairs.push(cUint(k), v);
   put(1, cUint(cfg.role));
   if (typeof cfg.staleness_s === "number") put(2, cUint(cfg.staleness_s));
   if (cfg.zones?.length) put(3, cArr(...cfg.zones.map(zoneCbor)));
-  if (cfg.keys?.length) put(4, cValue(cfg.keys));
-  if (cfg.slots?.length) put(5, cValue(cfg.slots));
-  if (cfg.calendars?.length) put(6, cValue(cfg.calendars));
-  if (cfg.confirm) put(7, cValue(cfg.confirm));
+  if (cfg.keys?.length) put(4, cArr(...cfg.keys.map(keyCbor)));
+  if (cfg.slots?.length) put(5, cArr(...cfg.slots.map(slotCbor)));
+  if (cfg.confirm) put(7, confirmCbor(cfg.confirm));
   if (cfg.crit?.length) put(8, cArr(...cfg.crit.map(cTstr)));
   return cMap(...pairs);
 }
