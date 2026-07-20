@@ -253,6 +253,19 @@ const confirmCbor = (c: any): Uint8Array =>
     [3, cUint(RMODE[c.mode] ?? 0)],
   ]);
 
+// days[] (0=Sun..6=Sat) → bitmask; "HH:MM" → minutes from midnight.
+const daysMask = (days: number[]): number => (days ?? []).reduce((m, d) => m | (1 << d), 0);
+const hhmm = (s: string): number => {
+  const [h, m] = (s ?? "0:0").split(":").map((x) => parseInt(x, 10) || 0);
+  return h * 60 + m;
+};
+const calendarCbor = (c: any): Uint8Array =>
+  imap([
+    [1, cUint(daysMask(c.days))],
+    [2, cUint(hhmm(c.start))],
+    [3, cUint(hhmm(c.end))],
+  ]);
+
 /** Encode a (flattened) device config as the pinned integer-keyed CBOR the
  *  firmware parses. `cfg` is the editor's config object plus an optional
  *  `crit` array; degrees-based zone centres are converted to 1e7 fixed point. */
@@ -264,6 +277,7 @@ export function configToCbor(cfg: any): Uint8Array {
   if (cfg.zones?.length) put(3, cArr(...cfg.zones.map(zoneCbor)));
   if (cfg.keys?.length) put(4, cArr(...cfg.keys.map(keyCbor)));
   if (cfg.slots?.length) put(5, cArr(...cfg.slots.map(slotCbor)));
+  if (cfg.calendars?.length) put(6, cArr(...cfg.calendars.map(calendarCbor)));
   if (cfg.confirm) put(7, confirmCbor(cfg.confirm));
   if (cfg.crit?.length) put(8, cArr(...cfg.crit.map((c: string) => cTstr(c))));
   return cMap(...pairs);

@@ -116,6 +116,12 @@ const slotCbor = (s) =>
     [10, cUint(s.budget ?? 0)],
   ]);
 const confirmCbor = (c) => imap([[1, secretB(c.secret)], [2, cUint(c.digits ?? 6)], [3, cUint(RMODE[c.mode] ?? 0)]]);
+const daysMask = (days) => (days ?? []).reduce((m, d) => m | (1 << d), 0);
+const hhmm = (s) => {
+  const [h, m] = (s ?? "0:0").split(":").map((x) => parseInt(x, 10) || 0);
+  return h * 60 + m;
+};
+const calendarCbor = (c) => imap([[1, cUint(daysMask(c.days))], [2, cUint(hhmm(c.start))], [3, cUint(hhmm(c.end))]]);
 export function configToCbor(cfg) {
   const pairs = [];
   const put = (k, v) => pairs.push(cUint(k), v);
@@ -124,6 +130,7 @@ export function configToCbor(cfg) {
   if (cfg.zones?.length) put(3, cArr(...cfg.zones.map(zoneCbor)));
   if (cfg.keys?.length) put(4, cArr(...cfg.keys.map(keyCbor)));
   if (cfg.slots?.length) put(5, cArr(...cfg.slots.map(slotCbor)));
+  if (cfg.calendars?.length) put(6, cArr(...cfg.calendars.map(calendarCbor)));
   if (cfg.confirm) put(7, confirmCbor(cfg.confirm));
   if (cfg.crit?.length) put(8, cArr(...cfg.crit.map(cTstr)));
   return cMap(...pairs);

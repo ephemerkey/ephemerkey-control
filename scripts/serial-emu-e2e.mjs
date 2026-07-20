@@ -201,11 +201,12 @@ try {
         progress: true,
         reset_on_invalid: true,
         negative: "lockout:300",
-        gates: { stillness_s: 0 },
+        gates: { stillness_s: 0, calendar: 0 },
         policy: { type: "sequence", n: 2, window_s: 600, gap_min_s: 30, gap_max_s: 90, delay_min_s: 0, delay_max_s: 120, jitter_s: 5 },
       },
     ],
-    crit: ["seq-jitter"],
+    calendars: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }],
+    crit: ["seq-jitter", "calendars"],
   });
   const fullResp = await pushBlob(seal(sign1(fullCfg, ownerPub, ownerPriv), devKxPub, 3, fields[1]), 3);
   check("full policy config parses on device", fullResp.type === FT.CONFIG_ACK, `type=0x${fullResp.type?.toString(16)} code=${fullResp.payload?.[0]}`);
