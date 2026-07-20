@@ -125,12 +125,12 @@ export class Dec {
 // --- device config (integer-keyed CBOR) -----------------------------------
 // The sealed inner payload, in the pinned integer-keyed schema the firmware
 // and emulator decode (ephemerkey-config): top level 1=role, 2=staleness_s,
-// 3=zones [[lat_e7,lon_e7,radius_m]], 4=keys, 5=slots, 7=confirm, 8=crit.
-// Every policy sub-document (key/slot/policy/gates/display/chain/confirm) is
-// itself integer-keyed — see ephemerkey-config's schema doc. `action` is
-// 0 unlock/1 lock/2 duress, `mode` 0 sequence/1 time/2 both everywhere.
-// (Calendars — key 6 — are reserved: the firmware has no window table yet, so
-// they stay in the source doc.)
+// 3=zones [[lat_e7,lon_e7,radius_m]], 4=keys, 5=slots, 6=calendars, 7=confirm,
+// 8=crit, 9=unlock_window_s (cascade reveal window). Every policy sub-document
+// (key/slot/policy/gates/display/chain/confirm/calendar) is itself
+// integer-keyed — see ephemerkey-config's schema doc. `action` is 0 unlock/
+// 1 lock/2 duress, `mode` 0 sequence/1 time/2 both everywhere. A key's field 7
+// (gated) marks a cascade reveal key; setting it auto-adds crit:["cascade"].
 
 const E7 = 10_000_000;
 const ACTION: Record<string, number> = { unlock: 0, lock: 1, duress: 2 };
@@ -175,6 +175,7 @@ const keyCbor = (k: any): Uint8Array =>
     [3, k.decoy !== undefined ? cUint(k.decoy) : undefined],
     [4, k.display ? displayCbor(k.display) : undefined],
     [5, k.chain ? chainCbor(k.chain) : undefined],
+    [7, k.gated ? cBool(true) : undefined], // cascade: ritual-gated reveal key
   ]);
 
 // The policy `type` (key 1) MUST come first — the decoder dispatches on it.
@@ -272,6 +273,11 @@ const calendarCbor = (c: any): Uint8Array =>
 export function configToCbor(cfg: any): Uint8Array {
   const pairs: Uint8Array[] = [];
   const put = (k: number, v: Uint8Array) => pairs.push(cUint(k), v);
+  // A ritual-gated key MUST ship crit:["cascade"] so a firmware that can't
+  // enforce the ritual refuses the config instead of revealing real codes
+  // ungated. Inject it here rather than trusting the caller to remember.
+  const crit = new Set<string>(cfg.crit ?? []);
+  if (cfg.keys?.some((k: any) => k.gated)) crit.add("cascade");
   put(1, cUint(cfg.role));
   if (typeof cfg.staleness_s === "number") put(2, cUint(cfg.staleness_s));
   if (cfg.zones?.length) put(3, cArr(...cfg.zones.map(zoneCbor)));
@@ -279,7 +285,8 @@ export function configToCbor(cfg: any): Uint8Array {
   if (cfg.slots?.length) put(5, cArr(...cfg.slots.map(slotCbor)));
   if (cfg.calendars?.length) put(6, cArr(...cfg.calendars.map(calendarCbor)));
   if (cfg.confirm) put(7, confirmCbor(cfg.confirm));
-  if (cfg.crit?.length) put(8, cArr(...cfg.crit.map((c: string) => cTstr(c))));
+  if (crit.size) put(8, cArr(...[...crit].map((c) => cTstr(c))));
+  if (typeof cfg.unlock_window_s === "number") put(9, cUint(cfg.unlock_window_s));
   return cMap(...pairs);
 }
 

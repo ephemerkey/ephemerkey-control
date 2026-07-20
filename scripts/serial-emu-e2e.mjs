@@ -211,6 +211,23 @@ try {
   const fullResp = await pushBlob(seal(sign1(fullCfg, ownerPub, ownerPriv), devKxPub, 3, fields[1]), 3);
   check("full policy config parses on device", fullResp.type === FT.CONFIG_ACK, `type=0x${fullResp.type?.toString(16)} code=${fullResp.payload?.[0]}`);
 
+  // A cascading GENERATOR config: a ritual-gated reveal key (field 7) + its
+  // decoy twin + an unlock-secret key driving a ritual slot, plus the reveal
+  // window (field 9). configToCbor auto-injects crit:["cascade"], so this also
+  // asserts the device advertises the cascade feature (else it would refuse).
+  const cascadeCfg = configToCbor({
+    role: 1,
+    unlock_window_s: 45,
+    keys: [
+      { secret: "B-REVEAL-CASCADE-0001", digits: 6, decoy: 1, display: { mode: "plain" }, gated: true },
+      { secret: "B-DECOY-CASCADE-00001", digits: 6 },
+      { secret: "A-UNLOCK-CASCADE-0001", digits: 6, display: {} },
+    ],
+    slots: [{ key: 2, action: "unlock", policy: { type: "always" }, gates: { stillness_s: 0 } }],
+  });
+  const cascadeResp = await pushBlob(seal(sign1(cascadeCfg, ownerPub, ownerPriv), devKxPub, 4, fields[1]), 4);
+  check("cascade generator config parses on device", cascadeResp.type === FT.CONFIG_ACK, `type=0x${cascadeResp.type?.toString(16)} code=${cascadeResp.payload?.[0]}`);
+
   // Pull the device's signed event log and relay it to the server.
   const evFrame = await chan.request(FT.EVENTS_REQ, Uint8Array.of(0, 0, 0, 0));
   check("events frame", evFrame.type === FT.EVENTS);

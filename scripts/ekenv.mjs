@@ -67,6 +67,7 @@ const keyCbor = (k) =>
     [3, k.decoy !== undefined ? cUint(k.decoy) : undefined],
     [4, k.display ? displayCbor(k.display) : undefined],
     [5, k.chain ? chainCbor(k.chain) : undefined],
+    [7, k.gated ? cBool(true) : undefined], // cascade: ritual-gated reveal key
   ]);
 function policyCbor(p) {
   switch (p.type) {
@@ -125,6 +126,10 @@ const calendarCbor = (c) => imap([[1, cUint(daysMask(c.days))], [2, cUint(hhmm(c
 export function configToCbor(cfg) {
   const pairs = [];
   const put = (k, v) => pairs.push(cUint(k), v);
+  // Gated (cascade) keys must carry crit:["cascade"] so a non-cascade firmware
+  // refuses rather than revealing real codes ungated — injected, not trusted.
+  const crit = new Set(cfg.crit ?? []);
+  if (cfg.keys?.some((k) => k.gated)) crit.add("cascade");
   put(1, cUint(cfg.role));
   if (typeof cfg.staleness_s === "number") put(2, cUint(cfg.staleness_s));
   if (cfg.zones?.length) put(3, cArr(...cfg.zones.map(zoneCbor)));
@@ -132,7 +137,8 @@ export function configToCbor(cfg) {
   if (cfg.slots?.length) put(5, cArr(...cfg.slots.map(slotCbor)));
   if (cfg.calendars?.length) put(6, cArr(...cfg.calendars.map(calendarCbor)));
   if (cfg.confirm) put(7, confirmCbor(cfg.confirm));
-  if (cfg.crit?.length) put(8, cArr(...cfg.crit.map(cTstr)));
+  if (crit.size) put(8, cArr(...[...crit].map(cTstr)));
+  if (typeof cfg.unlock_window_s === "number") put(9, cUint(cfg.unlock_window_s));
   return cMap(...pairs);
 }
 
