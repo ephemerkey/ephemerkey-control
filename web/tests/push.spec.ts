@@ -78,7 +78,7 @@ test.beforeAll(async () => {
     name: "push-e2e lock",
     fw: fields[4],
   });
-  const cfg = ekenv.utf8ToBytes(JSON.stringify({ role: 2, keys: [], slots: [] }));
+  const cfg = ekenv.configToCbor({ role: 2, keys: [], slots: [] });
   seqPushed = 1;
   const sealed = ekenv.seal(ekenv.sign1(cfg, ownerPub, ownerPriv), fields[3], seqPushed, fields[1]);
   const up = await client.signedPost(ownerPriv, "ekctl-manager-v1", `/api/sets/${setId}/configs`, {

@@ -13,8 +13,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ed25519, sha256, bytesToHex, utf8ToBytes, concatBytes,
-  cUint, cInt, cBstr, cTstr, cMap, Dec, sign1, sign1Parse, seal,
+  ed25519, sha256, bytesToHex, concatBytes,
+  cUint, cInt, cBstr, cTstr, cMap, Dec, sign1, sign1Parse, seal, configToCbor,
   FT, FrameChannel, crc32, makeClient,
 } from "./ekenv.mjs";
 
@@ -122,8 +122,8 @@ try {
   check("attested fw refresh", rr.body.devices[0].fw === fields[4], `fw=${rr.body.devices[0].fw}`);
 
   // Manager seals a config (kid = owner_pub for TOFU) and uploads it.
-  const cfgJson = utf8ToBytes(JSON.stringify({ role: 2, keys: [], slots: [] }));
-  const sealed = seal(sign1(cfgJson, ownerPub, ownerPriv), devKxPub, 1, fields[1]);
+  const cfgCbor = configToCbor({ role: 2, keys: [], slots: [] });
+  const sealed = seal(sign1(cfgCbor, ownerPub, ownerPriv), devKxPub, 1, fields[1]);
   r = await client.signedPost(ownerPriv, "ekctl-manager-v1", `/api/sets/${setId}/configs`, {
     device_id: devId, seq: 1, blob_b64: Buffer.from(sealed).toString("base64"),
   });
@@ -169,20 +169,20 @@ try {
 
   // A different owner cannot reconfigure a bound device (TOFU).
   const evilPriv = ed25519.utils.randomPrivateKey();
-  const evilSealed = seal(sign1(cfgJson, ed25519.getPublicKey(evilPriv), evilPriv), devKxPub, 2, fields[1]);
+  const evilSealed = seal(sign1(cfgCbor, ed25519.getPublicKey(evilPriv), evilPriv), devKxPub, 2, fields[1]);
   const evil = await pushBlob(evilSealed, 2);
   check("wrong owner rejected (wrong-set)", evil.type === FT.ERROR && evil.payload[0] === 4, `code=${evil.payload?.[0]}`);
 
   // Critical features: unknown crit -> refused (error 7), known -> accepted.
   const critBad = seal(
-    sign1(utf8ToBytes(JSON.stringify({ role: 2, keys: [], slots: [], crit: ["time-travel"] })), ownerPub, ownerPriv),
+    sign1(configToCbor({ role: 2, keys: [], slots: [], crit: ["time-travel"] }), ownerPub, ownerPriv),
     devKxPub, 2, fields[1],
   );
   const badResp = await pushBlob(critBad, 2);
   check("unknown critical feature refused", badResp.type === FT.ERROR && badResp.payload[0] === 7, `code=${badResp.payload?.[0]}`);
 
   const critGood = seal(
-    sign1(utf8ToBytes(JSON.stringify({ role: 2, keys: [], slots: [], crit: ["seq-jitter", "quorum-pace"] })), ownerPub, ownerPriv),
+    sign1(configToCbor({ role: 2, keys: [], slots: [], crit: ["seq-jitter", "quorum-pace"] }), ownerPub, ownerPriv),
     devKxPub, 2, fields[1],
   );
   const goodResp = await pushBlob(critGood, 2);

@@ -28,6 +28,45 @@ export const cTstr = (s) => concatBytes(cborHead(3, utf8ToBytes(s).length), utf8
 export const cArr = (...items) => concatBytes(cborHead(4, items.length), ...items);
 export const cMap = (...pairs) => concatBytes(cborHead(5, pairs.length / 2), ...pairs);
 
+// Device config as pinned integer-keyed CBOR (mirror of web/src/lib/cose.ts
+// configToCbor; the firmware's ephemerkey-envelope::config is the decoder).
+// Top level: 1=role, 2=staleness_s, 3=zones [[lat_e7,lon_e7,radius_m]],
+// 4=keys, 5=slots, 6=calendars, 7=confirm, 8=crit [tstr].
+const E7 = 10_000_000;
+export function cValue(v) {
+  if (typeof v === "boolean") return Uint8Array.of(v ? 0xf5 : 0xf4);
+  if (v === null || v === undefined) return Uint8Array.of(0xf6);
+  if (typeof v === "number") {
+    if (!Number.isInteger(v)) throw new Error(`cbor: non-integer ${v}`);
+    return cInt(v);
+  }
+  if (typeof v === "string") return cTstr(v);
+  if (Array.isArray(v)) return cArr(...v.map(cValue));
+  if (typeof v === "object") {
+    const pairs = [];
+    for (const [k, val] of Object.entries(v)) {
+      if (val === undefined) continue;
+      pairs.push(cTstr(k), cValue(val));
+    }
+    return cMap(...pairs);
+  }
+  throw new Error(`cbor: unsupported ${typeof v}`);
+}
+const zoneCbor = (z) => cArr(cInt(Math.round(z.lat * E7)), cInt(Math.round(z.lon * E7)), cUint(z.radius_m));
+export function configToCbor(cfg) {
+  const pairs = [];
+  const put = (k, v) => pairs.push(cUint(k), v);
+  put(1, cUint(cfg.role));
+  if (typeof cfg.staleness_s === "number") put(2, cUint(cfg.staleness_s));
+  if (cfg.zones?.length) put(3, cArr(...cfg.zones.map(zoneCbor)));
+  if (cfg.keys?.length) put(4, cValue(cfg.keys));
+  if (cfg.slots?.length) put(5, cValue(cfg.slots));
+  if (cfg.calendars?.length) put(6, cValue(cfg.calendars));
+  if (cfg.confirm) put(7, cValue(cfg.confirm));
+  if (cfg.crit?.length) put(8, cArr(...cfg.crit.map(cTstr)));
+  return cMap(...pairs);
+}
+
 export class Dec {
   constructor(buf) {
     this.buf = buf;

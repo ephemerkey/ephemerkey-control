@@ -122,6 +122,59 @@ export class Dec {
   }
 }
 
+// --- device config (integer-keyed CBOR) -----------------------------------
+// The sealed inner payload. Its TOP-LEVEL keys are the pinned contract the
+// firmware parses (ephemerkey-envelope::config): 1=role, 2=staleness_s,
+// 3=zones [[lat_e7,lon_e7,radius_m]], 8=crit [tstr]. Keys 4-7 carry the
+// policy sub-documents (keys/slots/calendars/confirm) as self-describing
+// CBOR — the firmware skips them today (it can't act on them yet), a future
+// policy parser reads them, and the emulator reads only `crit` (key 8).
+
+const E7 = 10_000_000;
+
+/** Generic CBOR for a JSON-ish value used by the not-yet-parsed policy
+ *  sub-documents: their inner fields keep their source-doc names. Throws on a
+ *  non-integer number — the config schema has none (coords go through zones). */
+export function cValue(v: unknown): Uint8Array {
+  if (typeof v === "boolean") return Uint8Array.of(v ? 0xf5 : 0xf4);
+  if (v === null || v === undefined) return Uint8Array.of(0xf6);
+  if (typeof v === "number") {
+    if (!Number.isInteger(v)) throw new Error(`cbor: non-integer ${v}`);
+    return cInt(v);
+  }
+  if (typeof v === "string") return cTstr(v);
+  if (Array.isArray(v)) return cArr(...v.map(cValue));
+  if (typeof v === "object") {
+    const pairs: Uint8Array[] = [];
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (val === undefined) continue;
+      pairs.push(cTstr(k), cValue(val));
+    }
+    return cMap(...pairs);
+  }
+  throw new Error(`cbor: unsupported ${typeof v}`);
+}
+
+const zoneCbor = (z: { lat: number; lon: number; radius_m: number }): Uint8Array =>
+  cArr(cInt(Math.round(z.lat * E7)), cInt(Math.round(z.lon * E7)), cUint(z.radius_m));
+
+/** Encode a (flattened) device config as the pinned integer-keyed CBOR the
+ *  firmware parses. `cfg` is the editor's config object plus an optional
+ *  `crit` array; degrees-based zone centres are converted to 1e7 fixed point. */
+export function configToCbor(cfg: any): Uint8Array {
+  const pairs: Uint8Array[] = [];
+  const put = (k: number, v: Uint8Array) => pairs.push(cUint(k), v);
+  put(1, cUint(cfg.role));
+  if (typeof cfg.staleness_s === "number") put(2, cUint(cfg.staleness_s));
+  if (cfg.zones?.length) put(3, cArr(...cfg.zones.map(zoneCbor)));
+  if (cfg.keys?.length) put(4, cValue(cfg.keys));
+  if (cfg.slots?.length) put(5, cValue(cfg.slots));
+  if (cfg.calendars?.length) put(6, cValue(cfg.calendars));
+  if (cfg.confirm) put(7, cValue(cfg.confirm));
+  if (cfg.crit?.length) put(8, cArr(...cfg.crit.map((c: string) => cTstr(c))));
+  return cMap(...pairs);
+}
+
 // --- COSE_Sign1 -----------------------------------------------------------
 
 const SIGN1_PROTECTED = Uint8Array.of(0xa1, 0x01, 0x27); // {1: -8 EdDSA}

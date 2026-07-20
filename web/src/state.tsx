@@ -32,7 +32,7 @@ import {
   setIdFromPub,
   wrappedFor,
 } from "./lib/keys";
-import { seal, sign1 } from "./lib/cose";
+import { configToCbor, seal, sign1 } from "./lib/cose";
 import { configFeatures, flattenDeviceConfig } from "./lib/config";
 
 const SOURCE_TEMPLATE = JSON.stringify(
@@ -376,7 +376,7 @@ export function PoolProvider({ children }: { children: ReactNode }) {
     const flat = flattenDeviceConfig(cfg, doc);
     const crit = configFeatures(flat);
     const payload = crit.length ? { ...flat, crit } : flat;
-    const inner = sign1(utf8ToBytes(JSON.stringify(payload)), key.pub, key.priv);
+    const inner = sign1(configToCbor(payload), key.pub, key.priv);
     const sealed = seal(inner, hexToBytes(d.kx_pub), seq, hexToBytes(d.device_id));
     await signedPost(key, "ekctl-manager-v1", `/api/sets/${setId}/configs`, {
       device_id: d.device_id,
